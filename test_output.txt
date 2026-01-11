@@ -1,0 +1,7 @@
+No files changed, compilation skipped
+Error: 
+failed to build OpenChain client
+
+Context:
+- Error #0: builder error
+- Error #1: No keychain is available. You may need to restart your computer.
