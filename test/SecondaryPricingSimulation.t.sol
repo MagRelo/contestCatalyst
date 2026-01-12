@@ -29,11 +29,11 @@ import "solmate/tokens/ERC20.sol";
  * previous settings with higher position bonuses. The pricing algorithm (polynomial bonding
  * curve) remains unchanged, so qualitative behaviors are the same.
  * 
- * Run with `forge test --match-path test/SecondaryContestPricingSimulation.t.sol -vv` to see console output
+ * Run with `forge test --match-path test/SecondaryPricingSimulation.t.sol -vv` to see console output
  * and manually review whether the pricing behavior feels fair and intuitive.
  * 
  * NOTE: When updating documentation, run tests with verbose mode and capture all logs:
- *   forge test --match-path test/SecondaryContestPricingSimulation.t.sol -vvv > test_output.txt
+ *   forge test --match-path test/SecondaryPricingSimulation.t.sol -vvv > test_output.txt
  * Then format the output into tables showing purchase size, percentage of total shares,
  * price change, price (before/after), and price per share (amount spent / tokens received)
  * for each scenario. Write these tables to PRICING.md.

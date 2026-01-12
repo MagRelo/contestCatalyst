@@ -131,7 +131,7 @@ Run the tests to see actual behavior:
 forge test --match-path test/SecondaryPricing.t.sol -vv
 
 # Integration tests with real scenarios
-forge test --match-path test/SecondaryContestPricingSimulation.t.sol -vvv
+forge test --match-path test/SecondaryPricingSimulation.t.sol -vvv
 ```
 
 ### Simulation Test Results

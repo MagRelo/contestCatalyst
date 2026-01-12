@@ -17,7 +17,7 @@ import "solmate/tokens/ERC20.sol";
  * 3. Calculates break-even economics at each step
  * 4. Identifies when marginal cost exceeds marginal value
  * 
- * Run with: forge test --match-path test/BreakEvenAnalysis.t.sol -vv
+ * Run with: forge test --match-path test/SecondaryPricingBreakeven.t.sol -vv
  */
 contract BreakEvenAnalysis is Test {
     ContestFactory public factory;

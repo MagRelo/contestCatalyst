@@ -31,7 +31,7 @@ Always run tests with maximum permissions to avoid these common issues.
 
 ## Standard Contract Settings
 
-**IMPORTANT: All tests and documentation must use the initial contract settings defined in `test/BreakEvenAnalysis.t.sol` and `BREAK_EVEN_ANALYSIS.md`.**
+**IMPORTANT: All tests and documentation must use the initial contract settings defined in `test/SecondaryPricingBreakeven.t.sol` and `BREAK_EVEN_ANALYSIS.md`.**
 
 To maintain consistency in assumptions and analysis across all tests and documentation, use the following standard contract settings:
 
@@ -39,7 +39,7 @@ To maintain consistency in assumptions and analysis across all tests and documen
 
 The standard initial contract settings are defined in:
 
-1. **`test/BreakEvenAnalysis.t.sol`** - See the `setUp()` function (lines 55-92) and constants at the top of the file:
+1. **`test/SecondaryPricingBreakeven.t.sol`** - See the `setUp()` function (lines 55-92) and constants at the top of the file:
 
    - `PRIMARY_DEPOSIT = 25e18` ($25)
    - `oracleFeeBps = 500` (5%)
