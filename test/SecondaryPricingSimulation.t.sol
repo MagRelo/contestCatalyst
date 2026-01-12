@@ -36,7 +36,7 @@ import "solmate/tokens/ERC20.sol";
  *   forge test --match-path test/SecondaryPricingSimulation.t.sol -vvv > test_output.txt
  * Then format the output into tables showing purchase size, percentage of total shares,
  * price change, price (before/after), and price per share (amount spent / tokens received)
- * for each scenario. Write these tables to PRICING.md.
+ * for each scenario. Write these tables to SecondaryPricingSimulation.md.
  * 
  * This test file illustrates 6 scenarios:
  * 1. Sequential equal purchases - price increases with each purchase

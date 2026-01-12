@@ -31,7 +31,7 @@ Always run tests with maximum permissions to avoid these common issues.
 
 ## Standard Contract Settings
 
-**IMPORTANT: All tests and documentation must use the initial contract settings defined in `test/SecondaryPricingBreakeven.t.sol` and `BREAK_EVEN_ANALYSIS.md`.**
+**IMPORTANT: All tests and documentation must use the initial contract settings defined in `test/SecondaryPricingBreakeven.t.sol` and `SecondaryPricingBreakeven.md`.**
 
 To maintain consistency in assumptions and analysis across all tests and documentation, use the following standard contract settings:
 
@@ -48,7 +48,7 @@ The standard initial contract settings are defined in:
    - `maxCrossSubsidyBps = 1500` (15%)
    - `PURCHASE_INCREMENT = 10e18` ($10)
 
-2. **`BREAK_EVEN_ANALYSIS.md`** - See the "Contest Configuration" section (lines 3-17):
+2. **`SecondaryPricingBreakeven.md`** - See the "Contest Configuration" section (lines 3-17):
    - `PRIMARY_DEPOSIT`: $25
    - `oracleFeeBps`: 500 (5%)
    - `positionBonusShareBps`: 500 (5%)
