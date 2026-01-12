@@ -370,6 +370,30 @@ contract SecondaryPricingTest is Test {
         assertEq(price, BASE_PRICE, "Price should equal BASE_PRICE when shares < 1e9");
     }
 
+    function test_calculatePrice_ScalingBoundary() public {
+        // Test boundary condition at exactly 1e9 shares
+        // At 1e9, shares / 1e9 = 1, so sharesSquared = 1
+        uint256 shares = 1e9;
+        uint256 price = SecondaryPricing.calculatePrice(shares);
+        uint256 expectedPrice = BASE_PRICE + (1 * COEFFICIENT) / 1e18;
+        assertEq(price, expectedPrice, "Price should be correct at scaling boundary");
+        
+        // Just below boundary should equal BASE_PRICE
+        uint256 priceBelow = SecondaryPricing.calculatePrice(1e9 - 1);
+        assertEq(priceBelow, BASE_PRICE, "Price should equal BASE_PRICE just below boundary");
+        
+        // At 1e9, the price includes the quadratic term (even if very small)
+        // This verifies the scaling boundary is correctly handled
+        assertGe(price, BASE_PRICE, "Price at 1e9 should be >= BASE_PRICE");
+        
+        // Verify the formula: price = BASE_PRICE + (sharesSquared * COEFFICIENT) / 1e18
+        // At 1e9: sharesSquared = (1e9 / 1e9) * (1e9 / 1e9) = 1
+        uint256 sharesSquared = (shares / 1e9) * (shares / 1e9);
+        assertEq(sharesSquared, 1, "sharesSquared should be 1 at 1e9");
+        uint256 calculatedPrice = BASE_PRICE + (sharesSquared * COEFFICIENT) / 1e18;
+        assertEq(price, calculatedPrice, "Price should match formula at boundary");
+    }
+
     function test_calculateTokensFromCollateral_VerySmallPayment() public {
         uint256 shares = 1000e18;
         uint256 payment = 1; // 1 wei
@@ -378,6 +402,31 @@ contract SecondaryPricingTest is Test {
         
         // May return 0 or very small amount due to precision
         assertGe(tokens, 0, "Should handle very small payments");
+    }
+
+    function test_calculateTokensFromCollateral_MinimumViablePayment() public {
+        // Test that documents when function returns 0 tokens
+        // Find minimum payment needed to receive at least 1 token
+        
+        uint256 shares = 1000e18;
+        
+        // Very small payment should return 0 tokens (due to high price at this share count)
+        uint256 verySmallPayment = 1; // 1 wei
+        uint256 tokens1 = SecondaryPricing.calculateTokensFromCollateral(shares, verySmallPayment);
+        
+        // With shares = 1000e18, price is high, so 1 wei should return 0 tokens
+        assertEq(tokens1, 0, "Very small payment should return 0 tokens");
+        
+        // Standard purchase increment should return tokens
+        uint256 standardPayment = PURCHASE_INCREMENT; // $10
+        uint256 tokens2 = SecondaryPricing.calculateTokensFromCollateral(shares, standardPayment);
+        assertGt(tokens2, 0, "Standard payment should return tokens");
+        
+        // At zero shares, even small payments should return tokens
+        uint256 tokens3 = SecondaryPricing.calculateTokensFromCollateral(0, verySmallPayment);
+        // At zero shares, price is BASE_PRICE, which is low, so even 1 wei might return tokens
+        // But due to binary search precision, it might still be 0
+        assertGe(tokens3, 0, "Even small payments at zero shares may return tokens");
     }
 
     function test_calculateTokensFromCollateral_ZeroShares() public {
@@ -408,6 +457,38 @@ contract SecondaryPricingTest is Test {
             // Cost should be close to payment (binary search should converge)
             assertLe(cost, payment, "Binary search should converge");
             assertGe(cost, payment * 95 / 100, "Binary search should be accurate");
+        }
+    }
+
+    function test_calculateTokensFromCollateral_NoOvercharge() public {
+        // CRITICAL UX TEST: Verify users never pay more than their payment amount
+        // This ensures cost <= payment (prevents overcharging users)
+        
+        uint256[] memory shareValues = new uint256[](5);
+        shareValues[0] = 0;
+        shareValues[1] = 1e18;
+        shareValues[2] = 1000e18;
+        shareValues[3] = 1e21;
+        shareValues[4] = 1e22;
+        
+        uint256[] memory payments = new uint256[](4);
+        payments[0] = PURCHASE_INCREMENT; // $10
+        payments[1] = PURCHASE_INCREMENT * 5; // $50
+        payments[2] = PURCHASE_INCREMENT * 10; // $100
+        payments[3] = PURCHASE_INCREMENT * 100; // $1000
+        
+        for (uint256 i = 0; i < shareValues.length; i++) {
+            for (uint256 j = 0; j < payments.length; j++) {
+                uint256 tokens = SecondaryPricing.calculateTokensFromCollateral(shareValues[i], payments[j]);
+                
+                // Only check if we got tokens (skip 0 token cases)
+                if (tokens > 0) {
+                    uint256 cost = _calculateSimpsonCost(shareValues[i], tokens);
+                    
+                    // CRITICAL: Cost must never exceed payment (prevents overcharging)
+                    assertLe(cost, payments[j], "User should never pay more than payment amount");
+                }
+            }
         }
     }
 

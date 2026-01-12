@@ -375,6 +375,32 @@ contract SecondaryContestPricingTest is Test {
         console.log("- Early buyer 2 share change: %e%%", shareDiff2 / 1e16);
         console.log("- Review whether early buyers maintained reasonable share percentage");
     }
+
+    /**
+     * @notice Test that ContestController reverts when payment is too small to purchase tokens
+     * @dev This is a CRITICAL UX test - users should not lose money without receiving tokens
+     */
+    function test_addSecondaryPosition_RevertsOnZeroTokens() public {
+        // Create a scenario where payment would result in 0 tokens
+        // We need high shares (high price) and very small payment
+        
+        // First, make a large purchase to drive up the price
+        vm.startPrank(whale);
+        paymentToken.approve(address(contest), 100000e18);
+        contest.addSecondaryPosition(1, 100000e18, new bytes32[](0)); // Large purchase drives price up
+        vm.stopPrank();
+        
+        // Now try to make a very small payment (should revert)
+        uint256 verySmallPayment = 1; // 1 wei
+        vm.startPrank(user1);
+        paymentToken.approve(address(contest), verySmallPayment);
+        
+        // Should revert with clear error message
+        vm.expectRevert("Payment too small: insufficient to purchase tokens");
+        contest.addSecondaryPosition(1, verySmallPayment, new bytes32[](0));
+        
+        vm.stopPrank();
+    }
     
     // ============ Helper Functions ============
     

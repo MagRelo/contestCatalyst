@@ -358,7 +358,8 @@ contract ContestController is ERC1155, ReentrancyGuard {
      * @param amount Amount of payment token to deposit
      * @param merkleProof Merkle proof for whitelist verification (empty array if no gating)
      * @dev Deposit flow: oracle fee → position bonus (to entry owner) → cross-subsidy (dynamic) → collateral (backs ERC1155)
-     * @dev Uses LMSR pricing - popular entries cost more
+     * @dev Uses polynomial bonding curve pricing - popular entries cost more
+     * @dev Reverts if payment is too small to purchase at least 1 token (prevents user money loss)
      */
     function addSecondaryPosition(uint256 entryId, uint256 amount, bytes32[] calldata merkleProof)
         external
@@ -390,6 +391,9 @@ contract ContestController is ERC1155, ReentrancyGuard {
             shares,
             collateral
         );
+
+        // Prevent user from paying but receiving no tokens (critical UX protection)
+        require(tokensToMint > 0, "Payment too small: insufficient to purchase tokens");
 
         // Process using library (updates netPosition and tracks deposits)
         SecondaryContest.processAddSecondaryPosition(

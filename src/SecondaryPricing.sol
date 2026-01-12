@@ -30,6 +30,7 @@ library SecondaryPricing {
      */
     function calculatePrice(uint256 shares) internal pure returns (uint256) {
         // Polynomial bonding curve: price = BASE_PRICE + COEFFICIENT * shares^2
+        // Scaling: shares < 1e9 always result in BASE_PRICE (prevents overflow)
         uint256 sharesSquared = (shares / 1e9) * (shares / 1e9); // shares^2 scaled to avoid overflow
         return BASE_PRICE + (sharesSquared * COEFFICIENT) / 1e18;
     }
@@ -38,7 +39,9 @@ library SecondaryPricing {
      * @notice Calculate tokens received for a payment amount
      * @param shares Current shares before purchase
      * @param payment Amount to spend
-     * @return tokensToMint Tokens received
+     * @return tokensToMint Tokens received (may be 0 if payment is insufficient)
+     * @dev Returns 0 if payment is insufficient to purchase at least 1 token
+     * @dev Caller should check return value and revert if tokensToMint == 0 for non-zero payment
      */
     function calculateTokensFromCollateral(
         uint256 shares,
