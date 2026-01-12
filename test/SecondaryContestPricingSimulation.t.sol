@@ -19,11 +19,21 @@ import "solmate/tokens/ERC20.sol";
  * - Provides appropriate advantages to early bettors
  * - Protects against whale manipulation while still allowing large purchases
  * 
- * Run with `forge test --match-path test/SecondaryContestPricing.t.sol -vv` to see console output
+ * Contest Settings:
+ * - Oracle fee: 5% (500 bps)
+ * - Position bonus: 5% (500 bps) - goes to entry owner
+ * - Target primary share: 30% (3000 bps)
+ * - Max cross-subsidy: 15% (1500 bps)
+ * 
+ * These settings mean more collateral per deposit (better value for buyers) compared to
+ * previous settings with higher position bonuses. The pricing algorithm (polynomial bonding
+ * curve) remains unchanged, so qualitative behaviors are the same.
+ * 
+ * Run with `forge test --match-path test/SecondaryContestPricingSimulation.t.sol -vv` to see console output
  * and manually review whether the pricing behavior feels fair and intuitive.
  * 
  * NOTE: When updating documentation, run tests with verbose mode and capture all logs:
- *   forge test --match-path test/SecondaryContestPricing.t.sol -vvv > test_output.txt
+ *   forge test --match-path test/SecondaryContestPricingSimulation.t.sol -vvv > test_output.txt
  * Then format the output into tables showing purchase size, percentage of total shares,
  * price change, price (before/after), and price per share (amount spent / tokens received)
  * for each scenario. Write these tables to PRICING.md.
@@ -50,8 +60,6 @@ contract SecondaryContestPricingTest is Test {
     address public whale = address(0x100);
     
     uint256 public constant PRIMARY_DEPOSIT = 25e18; // $25 (recommended for typical contests)
-    // Note: liquidityParameter is no longer used with new pricing, but kept for factory compatibility
-    uint256 public constant LIQUIDITY_PARAM = 1500e18;
     
     struct PurchaseResult {
         uint256 amountSpent;
@@ -69,20 +77,16 @@ contract SecondaryContestPricingTest is Test {
         // Deploy factory
         factory = new ContestFactory();
         
-        // Create contest with custom liquidity parameter
-        // Higher b = flatter curve (less price movement per purchase)
-        // Lower b = steeper curve (more price movement per purchase)
+        // Create contest
         address contestAddress = factory.createContest(
             address(paymentToken),
             oracle,
             PRIMARY_DEPOSIT,
-            100, // 1% oracle fee
+            500, // 5% oracle fee
             block.timestamp + 365 days,
-            LIQUIDITY_PARAM, // Custom liquidity parameter
-            5000, // demandSensitivity: 50%
-            5000, // positionBonusShareBps: 50%
-            5000, // targetPrimaryShareBps: 50%
-            1000  // maxCrossSubsidyBps: 10%
+            500, // positionBonusShareBps: 5%
+            3000, // targetPrimaryShareBps: 30%
+            1500  // maxCrossSubsidyBps: 15%
         );
         
         contest = ContestController(contestAddress);

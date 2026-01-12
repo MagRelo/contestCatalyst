@@ -131,12 +131,12 @@ Run the tests to see actual behavior:
 forge test --match-path test/SecondaryPricing.t.sol -vv
 
 # Integration tests with real scenarios
-forge test --match-path test/SecondaryContestPricing.t.sol -vvv
+forge test --match-path test/SecondaryContestPricingSimulation.t.sol -vvv
 ```
 
 ### Simulation Test Results
 
-The following tables show real-world simulation results from the test scenarios. These demonstrate how the polynomial bonding curve behaves in practice.
+The following tables show real-world simulation results from test runs with **current settings** (5% oracle fee, 5% position bonus, 30% target primary share, 15% max cross-subsidy). These demonstrate how the polynomial bonding curve behaves in practice.
 
 #### Scenario 1: Sequential Equal Purchases
 
@@ -144,16 +144,17 @@ Three users each purchase $10 worth of shares on entry 1.
 
 | User   | Purchase Size | Tokens Received | % of Total Shares | Price Before | Price After | Price Change | Price Per Share |
 | ------ | ------------- | --------------- | ----------------- | ------------ | ----------- | ------------ | --------------- |
-| User 1 | $10           | 4.9500e18       | 100.00%           | 1.0000       | 1.0000      | +0.00%       | 2.0202          |
-| User 2 | $10           | 4.9497e18       | 50.00%            | 1.0000       | 1.0001      | +0.00%       | 2.0203          |
-| User 3 | $10           | 4.9492e18       | 33.33%            | 1.0001       | 1.0002      | +0.01%       | 2.0205          |
+| User 1 | $10           | 9.0248e18       | 100.00%           | 1.0000       | 1.0001      | +0.00%       | 1.1081          |
+| User 2 | $10           | 9.0233e18       | 50.00%            | 1.0001       | 1.0003      | +0.02%       | 1.1082          |
+| User 3 | $10           | 9.0204e18       | 33.33%            | 1.0003       | 1.0007      | +0.04%       | 1.1086          |
 
 **Observations:**
 
 - First purchase gets the most tokens (100% of supply initially)
 - Each subsequent purchase receives slightly fewer tokens as price increases
-- Price increases gradually and smoothly for small equal purchases (0.00%, 0.00%, 0.01%)
-- Price per share increases slightly with each purchase, showing the bonding curve effect
+- Price increases gradually and smoothly for small equal purchases (0.00%, 0.02%, 0.04%)
+- Price per share increases slightly with each purchase (1.1081 → 1.1082 → 1.1086), showing the bonding curve effect
+- **With new settings**: More tokens per dollar (~9.02e18 vs ~4.95e18) due to more collateral per deposit
 
 #### Scenario 2: Mixed Purchase Sizes
 
@@ -161,16 +162,17 @@ User 1 purchases $10, Whale purchases $1000, User 3 purchases $10.
 
 | User   | Purchase Size | Tokens Received | % of Total Shares | Price Before | Price After | Price Change | Price Per Share |
 | ------ | ------------- | --------------- | ----------------- | ------------ | ----------- | ------------ | --------------- |
-| User 1 | $10           | 4.9500e18       | 100.00%           | 1.0000       | 1.0000      | +0.00%       | 2.0202          |
-| Whale  | $1,000        | 4.1993e20       | 98.83%            | 1.0000       | 1.1805      | +18.05%      | 2.3813          |
-| User 3 | $10           | 4.1867e18       | 0.98%             | 1.1805       | 1.1841      | +0.30%       | 2.3885          |
+| User 1 | $10           | 9.0248e18       | 100.00%           | 1.0000       | 1.0001      | +0.00%       | 1.1081          |
+| Whale  | $1,000        | 6.6504e20       | 98.66%            | 1.0001       | 1.4544      | +45.42%      | 1.5037          |
+| User 3 | $10           | 5.2618e18       | 0.78%             | 1.4544       | 1.4615      | +0.48%       | 1.9005          |
 
 **Observations:**
 
-- Whale purchase (100x larger) moves price significantly (+18.05%)
-- Whale receives 84.8x more tokens than User 1 (less than 100x due to price movement during purchase)
-- Small purchase after whale gets fewer tokens (4.19e18 vs 4.95e18) due to higher price
-- Price per share increases dramatically for whale purchase, showing quadratic curve effect
+- Whale purchase (100x larger) moves price significantly (+45.42%)
+- Whale receives 73.7x more tokens than User 1 (less than 100x due to price movement during purchase)
+- Small purchase after whale gets fewer tokens (5.26e18 vs 9.02e18) due to higher price
+- Price per share increases dramatically for whale purchase (1.1081 → 1.5037), showing quadratic curve effect
+- **With new settings**: More tokens per dollar for all purchases, but same qualitative behavior
 
 #### Scenario 3: Multiple Entries Competition
 
@@ -178,23 +180,24 @@ Users purchase on different entries to show how prices evolve independently.
 
 | Entry   | Purchases   | Final Price | Price Ratio vs Entry 2 |
 | ------- | ----------- | ----------- | ---------------------- |
-| Entry 1 | 3 purchases | 1.0002      | 1.00x                  |
-| Entry 2 | 1 purchase  | 1.0000      | 1.00x                  |
-| Entry 3 | 0 purchases | 1.0000      | 1.00x                  |
+| Entry 1 | 3 purchases | 1.0007      | 1.0006x                |
+| Entry 2 | 1 purchase  | 1.0001      | 1.0000x                |
+| Entry 3 | 0 purchases | 1.0000      | 0.9999x                |
 
 **Purchase Details for Entry 1:**
 
 | User   | Purchase Size | Tokens Received | Price Before | Price After | Price Change | Price Per Share |
 | ------ | ------------- | --------------- | ------------ | ----------- | ------------ | --------------- |
-| User 1 | $10           | 4.9500e18       | 1.0000       | 1.0000      | +0.00%       | 2.0202          |
-| User 2 | $10           | 4.9497e18       | 1.0000       | 1.0001      | +0.00%       | 2.0203          |
-| User 4 | $10           | 4.9492e18       | 1.0001       | 1.0002      | +0.01%       | 2.0205          |
+| User 1 | $10           | 9.0248e18       | 1.0000       | 1.0001      | +0.00%       | 1.1081          |
+| User 2 | $10           | 9.0233e18       | 1.0001       | 1.0003      | +0.02%       | 1.1082          |
+| User 4 | $10           | 9.0204e18       | 1.0003       | 1.0007      | +0.04%       | 1.1086          |
 
 **Observations:**
 
 - Each entry's price evolves independently based on its own supply
-- Entry 1 with 3 purchases has slightly higher price (1.0002) than Entry 2 with 1 purchase (1.0000)
+- Entry 1 with 3 purchases has higher price (1.0007) than Entry 2 with 1 purchase (1.0001)
 - Price increases are gradual and smooth for small purchases
+- Entry 1 is ~1.0006x more expensive than Entry 2, demonstrating independent price evolution
 
 #### Scenario 4: Early vs Late Purchases
 
@@ -202,15 +205,16 @@ User 1 purchases early ($100), then many users purchase, then User 1 purchases a
 
 | Purchase | Purchase Size | Tokens Received | Price Before | Price After | Price Change | Price Per Share |
 | -------- | ------------- | --------------- | ------------ | ----------- | ------------ | --------------- |
-| Early    | $100          | 4.9460e19       | 1.0000       | 1.0024      | +0.24%       | 2.0218          |
-| Late     | $100          | 4.5114e19       | 1.0835       | 1.1116      | +2.59%       | 2.2166          |
+| Early    | $100          | 9.0007e19       | 1.0000       | 1.0081      | +0.81%       | 1.1110          |
+| Late     | $100          | 6.2268e19       | 1.2027       | 1.2626      | +4.98%       | 1.6060          |
 
 **Observations:**
 
-- Early purchase gets 9.6% more tokens than late purchase (4.95e19 vs 4.51e19)
-- Price increased from 1.0000 to 1.1116 (11.16% increase) between purchases
-- Early bettors receive better value: 2.02 vs 2.22 price per share (9.6% higher for late)
-- Price per share increases by 9.6% for late purchase, showing early bettor advantage
+- Early purchase gets 44.5% more tokens than late purchase (9.00e19 vs 6.23e19)
+- Price increased from 1.0000 to 1.2626 (26.26% increase) between purchases
+- Early bettors receive better value: 1.111 vs 1.606 price per share (44.5% better for early)
+- Price per share increases significantly for late purchase (1.111 → 1.606), showing strong early bettor advantage
+- **With new settings**: More tokens overall, but same qualitative advantage for early buyers
 
 #### Scenario 5: Whale Purchase Impact
 
@@ -218,20 +222,21 @@ Small purchases establish baseline, then whale makes massive purchase ($10,000).
 
 | User   | Purchase Size | Tokens Received | % of Total Shares | Price Before | Price After | Price Change | Price Per Share |
 | ------ | ------------- | --------------- | ----------------- | ------------ | ----------- | ------------ | --------------- |
-| User 1 | $10           | 4.9500e18       | 33.33%            | 1.0000       | 1.0000      | +0.00%       | 2.0202          |
-| User 2 | $10           | 4.9497e18       | 33.33%            | 1.0000       | 1.0001      | +0.00%       | 2.0203          |
-| User 3 | $10           | 4.9492e18       | 33.33%            | 1.0001       | 1.0002      | +0.01%       | 2.0205          |
-| Whale  | $10,000       | 2.2270e21       | 99.01%            | 1.0002       | 6.0259      | +502.46%     | 4.4903          |
-| User 4 | $10           | 8.2120e17       | 0.37%             | 6.0259       | 6.0296      | +0.06%       | 12.1773         |
+| User 1 | $10           | 9.0248e18       | 33.33%            | 1.0000       | 1.0001      | +0.00%       | 1.1081          |
+| User 2 | $10           | 9.0233e18       | 33.33%            | 1.0001       | 1.0003      | +0.02%       | 1.1082          |
+| User 3 | $10           | 9.0204e18       | 33.33%            | 1.0003       | 1.0007      | +0.04%       | 1.1086          |
+| Whale  | $10,000       | 3.8328e21       | 99.26%            | 1.0007       | 15.8987     | +1488.71%    | 2.6090          |
+| User 4 | $10           | 4.8245e17       | 0.12%             | 15.8987      | 15.9025     | +0.02%       | 20.7275         |
 
 **Observations:**
 
-- First three small purchases show gradual price increases (0.00%, 0.00%, 0.01%) - smooth curve
-- Whale purchase increases price dramatically by 502.46% (from 1.0002 to 6.0259)
-- Whale receives 449.9x more tokens than baseline users (spent 1000x more)
-- Whale pays 2.22x more per share than baseline (4.49 vs 2.02) due to quadratic curve
-- Small purchase after whale gets 6.0x fewer tokens (8.21e17 vs 4.95e18) due to massive price increase
-- Price per share for User 4 is 6.0x higher than baseline (12.18 vs 2.02), showing whale protection
+- First three small purchases show gradual price increases (0.00%, 0.02%, 0.04%) - smooth curve
+- Whale purchase increases price dramatically by 1488.71% (from 1.0007 to 15.8987)
+- Whale receives 424.7x more tokens than baseline users (spent 1000x more)
+- Whale pays 2.35x more per share than baseline (2.609 vs 1.108) due to quadratic curve
+- Small purchase after whale gets 18.7x fewer tokens (4.82e17 vs 9.02e18) due to massive price increase
+- Price per share for User 4 is 18.7x higher than baseline (20.73 vs 1.108), showing strong whale protection
+- **With new settings**: More dramatic price impact due to larger token amounts, demonstrating quadratic curve protection
 
 #### Scenario 6: Early Buyers Maintain Share
 
@@ -239,25 +244,46 @@ Early buyers purchase, then whale makes large purchase.
 
 | Buyer   | Purchase Size | Tokens Received | Share Before Whale | Share After Whale | Share Change | Price Per Share |
 | ------- | ------------- | --------------- | ------------------ | ----------------- | ------------ | --------------- |
-| Early 1 | $100          | 4.9460e19       | 50.1%              | 2.1%              | -48.0%       | 2.0218          |
-| Early 2 | $100          | 4.9220e19       | 49.9%              | 2.1%              | -47.8%       | 2.0317          |
-| Whale   | $10,000       | 2.2060e21       | -                  | 95.7%             | -            | 4.5331          |
+| Early 1 | $100          | 9.0007e19       | 53.8%              | 2.3%              | -51.5%       | 1.1110          |
+| Early 2 | $100          | 7.7295e19       | 46.2%              | 2.0%              | -44.2%       | 1.2937          |
+| Whale   | $10,000       | 3.7312e21       | -                  | 95.7%             | -            | 2.6801          |
 
 **Price Changes:**
 
 | Buyer   | Price Before | Price After | Price Change |
 | ------- | ------------ | ----------- | ------------ |
-| Early 1 | 1.0000       | 1.0024      | +0.24%       |
-| Early 2 | 1.0024       | 1.0097      | +0.72%       |
-| Whale   | 1.0097       | 6.3116      | +525.70%     |
+| Early 1 | 1.0000       | 1.0081      | +0.81%       |
+| Early 2 | 1.0081       | 1.0280      | +1.97%       |
+| Whale   | 1.0280       | 16.1983     | +1475.72%    |
 
 **Observations:**
 
 - Early buyers' absolute token amounts remain unchanged
-- Early buyers' percentage share decreases significantly (from ~50% to ~2%) due to whale's large purchase
-- Whale purchase increases price by 525.70%, dramatically affecting subsequent purchases
-- Early buyers paid 2.02-2.03 per share, whale paid 4.53 per share (2.24x more)
+- Early buyers' percentage share decreases significantly (from ~54% and ~46% to ~2% each) due to whale's large purchase
+- Whale purchase increases price by 1475.72%, dramatically affecting subsequent purchases
+- Early buyers paid 1.111-1.294 per share, whale paid 2.680 per share (2.41x more)
 - Early buyers maintain their absolute position but are diluted by whale's purchase
+- **With new settings**: More tokens overall, but same dilution effect - early buyers maintain absolute position but lose percentage share
+
+## Deposit Flow
+
+When a secondary participant makes a deposit, the funds are allocated as follows:
+
+1. **Oracle Fee**: 5% of deposit (500 basis points) - goes to oracle
+2. **Position Bonus**: 5% of remaining amount (500 basis points) - goes to entry owner
+3. **Cross-Subsidy**: Up to 15% of remaining amount (1500 basis points) - dynamically allocated to balance primary/secondary pools toward 30% target
+4. **Collateral**: Remaining amount - backs ERC1155 tokens and determines pricing
+
+**Example for $100 deposit:**
+
+- Oracle fee: $5.00
+- After fee: $95.00
+- Position bonus: $4.75 (5% of $95)
+- After bonus: $90.25
+- Cross-subsidy: ~$13.54 (15% of $90.25, if needed to balance pools)
+- Collateral: ~$76.71 (remaining amount used for token purchase)
+
+The collateral amount is what actually goes into the bonding curve pricing calculation, meaning more tokens are received per dollar compared to previous settings with higher fees.
 
 ## Parameters
 
@@ -268,6 +294,15 @@ Early buyers purchase, then whale makes large purchase.
 | `PRICE_PRECISION` | 1e6   | Represents 1.0 in price calculations    |
 | `BASE_PRICE`      | 1e6   | Minimum price (1.0)                     |
 | `COEFFICIENT`     | 1     | Coefficient for quadratic term (scaled) |
+
+### Contest Settings
+
+| Parameter               | Value | Description                                                 |
+| ----------------------- | ----- | ----------------------------------------------------------- |
+| `oracleFeeBps`          | 500   | Oracle fee: 5% (500 basis points)                           |
+| `positionBonusShareBps` | 500   | Position bonus: 5% (500 basis points) - goes to entry owner |
+| `targetPrimaryShareBps` | 3000  | Target primary-side share: 30% (3000 basis points)          |
+| `maxCrossSubsidyBps`    | 1500  | Maximum cross-subsidy: 15% (1500 basis points)              |
 
 ### Tuning Parameters
 
@@ -363,3 +398,30 @@ However, the implementation uses Simpson's rule for numerical integration, which
 - Early bettors get better prices (lower shares = lower price)
 - The bonding curve ensures price increases as demand (shares) increases
 - The scaling factors (`/ 1e9` and `/ 1e18`) in the implementation prevent overflow when dealing with large share values
+
+## Migration Notes
+
+### Settings Changes
+
+The contest settings were updated from:
+
+- **Old**: 1% oracle fee, 50% position bonus, 50% target primary share, 10% max cross-subsidy
+- **New**: 5% oracle fee, 5% position bonus, 30% target primary share, 15% max cross-subsidy
+
+### Impact on Pricing Behavior
+
+1. **More Collateral Per Deposit**: With lower position bonus (5% vs 50%), more funds go to collateral, resulting in more tokens per dollar spent (~9.02e18 vs ~4.95e18 for $10 purchase)
+2. **Slower Initial Price Growth**: More tokens per purchase means price increases more gradually for small purchases
+3. **Same Core Properties**: The pricing algorithm (polynomial bonding curve) is unchanged, so all qualitative behaviors remain:
+   - Early bettor advantage ✓
+   - Whale protection ✓
+   - Price increases with shares ✓
+   - Quadratic growth for large purchases ✓
+
+### Test Results
+
+The test result tables in this document have been updated with current settings (as of latest test run). All values reflect the new settings:
+
+- More tokens per dollar due to higher collateral allocation
+- Same qualitative behaviors (early bettor advantage, whale protection)
+- Price increases remain quadratic, providing strong protection against manipulation

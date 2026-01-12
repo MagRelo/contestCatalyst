@@ -54,12 +54,6 @@ contract ContestController is ERC1155, ReentrancyGuard {
     /// @notice Timestamp when contest expires (for refunds)
     uint256 public immutable expiryTimestamp;
 
-    /// @notice LMSR liquidity parameter - controls price curve steepness
-    uint256 public immutable liquidityParameter;
-
-    /// @notice Demand sensitivity in basis points - controls LMSR price curve steepness
-    uint256 public immutable demandSensitivityBps;
-
     /// @notice Portion of accumulated subsidy that goes to position bonuses in basis points (e.g., 5000 = 50%)
     /// @dev Remainder goes to prize pool. Applied at settlement, not per-deposit.
     uint256 public immutable positionBonusShareBps;
@@ -188,10 +182,6 @@ contract ContestController is ERC1155, ReentrancyGuard {
      * @param _primaryDepositAmount Fixed amount each primary participant must deposit
      * @param _oracleFeeBps Oracle fee as basis points
      * @param _expiryTimestamp When contest expires (for refunds)
-     * @param _liquidityParameter LMSR curve parameter - controls price curve steepness
-     * @dev Recommended: Use ContestFactory which calculates this as primaryDepositAmount × 100
-     * @dev Lower values = steeper curves (stronger early incentive), higher values = flatter curves
-     * @param _demandSensitivityBps LMSR price sensitivity parameter
      * @param _positionBonusShareBps Portion of accumulated subsidy going to position bonuses (e.g., 5000 = 50%)
      * @param _targetPrimaryShareBps Target primary-side share for cross-subsidy balancing
      * @param _maxCrossSubsidyBps Maximum cross-subsidy per deposit
@@ -202,8 +192,6 @@ contract ContestController is ERC1155, ReentrancyGuard {
         uint256 _primaryDepositAmount,
         uint256 _oracleFeeBps,
         uint256 _expiryTimestamp,
-        uint256 _liquidityParameter,
-        uint256 _demandSensitivityBps,
         uint256 _positionBonusShareBps,
         uint256 _targetPrimaryShareBps,
         uint256 _maxCrossSubsidyBps
@@ -213,8 +201,6 @@ contract ContestController is ERC1155, ReentrancyGuard {
         require(_primaryDepositAmount > 0, "Invalid deposit amount");
         require(_oracleFeeBps <= 1000, "Oracle fee too high"); // Max 10%
         require(_expiryTimestamp > block.timestamp, "Expiry in past");
-        require(_liquidityParameter > 0, "Invalid liquidity parameter");
-        require(_demandSensitivityBps <= BPS_DENOMINATOR, "Invalid demand sensitivity");
         require(_positionBonusShareBps <= BPS_DENOMINATOR, "Invalid position bonus share");
         require(_targetPrimaryShareBps <= BPS_DENOMINATOR, "Invalid target ratio");
         require(_maxCrossSubsidyBps <= BPS_DENOMINATOR, "Invalid subsidy cap");
@@ -224,8 +210,6 @@ contract ContestController is ERC1155, ReentrancyGuard {
         primaryDepositAmount = _primaryDepositAmount;
         oracleFeeBps = _oracleFeeBps;
         expiryTimestamp = _expiryTimestamp;
-        liquidityParameter = _liquidityParameter;
-        demandSensitivityBps = _demandSensitivityBps;
         positionBonusShareBps = _positionBonusShareBps;
         targetPrimaryShareBps = _targetPrimaryShareBps;
         maxCrossSubsidyBps = _maxCrossSubsidyBps;
