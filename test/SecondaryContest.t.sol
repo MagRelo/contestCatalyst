@@ -1764,10 +1764,26 @@ contract SecondaryContestTest is Test {
     ) public {
         entryId = bound(entryId, 1, 1000);
         winningEntry = bound(winningEntry, 1, 1000);
-        totalSupply = bound(totalSupply, 1, type(uint256).max / 4);
+        
+        // Use realistic bounds to prevent overflow while still testing edge cases
+        // Max totalSupply: 1e30 (very large but safe for calculations)
+        totalSupply = bound(totalSupply, 1, 1e30);
         balance = bound(balance, 1, totalSupply);
-        prizePool = bound(prizePool, 0, type(uint256).max / 4);
-        prizePoolSubsidy = bound(prizePoolSubsidy, 0, type(uint256).max / 4);
+        
+        // Prevent overflow: balance * totalFunds must not overflow
+        // Use sqrt(max_uint256) as safe upper bound for each component
+        uint256 maxSafeValue = 1e38; // Safe for multiplication without overflow
+        prizePool = bound(prizePool, 0, maxSafeValue);
+        prizePoolSubsidy = bound(prizePoolSubsidy, 0, maxSafeValue);
+        
+        // Ensure balance * (prizePool + prizePoolSubsidy) doesn't overflow
+        uint256 totalFunds = prizePool + prizePoolSubsidy;
+        if (totalFunds > 0 && balance > type(uint256).max / totalFunds) {
+            // Adjust balance to prevent overflow in multiplication
+            balance = bound(balance, 1, type(uint256).max / totalFunds);
+        }
+        
+        // Ensure availableBalance is reasonable
         availableBalance = bound(availableBalance, 0, type(uint256).max / 2);
         
         testStorage.setSecondaryWinningEntry(winningEntry);
@@ -1786,29 +1802,28 @@ contract SecondaryContestTest is Test {
             );
         
         if (entryId == winningEntry && totalSupply > 0) {
-            uint256 totalFunds = prizePool + prizePoolSubsidy;
             uint256 expectedPayout = (balance * totalFunds) / totalSupply;
             
             if (expectedPayout > availableBalance) {
                 expectedPayout = availableBalance;
             }
             
-            assertEq(payout, expectedPayout);
+            assertEq(payout, expectedPayout, "Payout should match expected calculation");
             
             if (payout > 0 && totalFunds > 0) {
-                assertEq(fromBasePool, (payout * prizePool) / totalFunds);
-                assertEq(fromSubsidyPool, payout - fromBasePool);
+                assertEq(fromBasePool, (payout * prizePool) / totalFunds, "Base pool reduction should be proportional");
+                assertEq(fromSubsidyPool, payout - fromBasePool, "Subsidy pool reduction should be remainder");
             }
             
             uint256 remainingSupply = uint256(testStorage.netPosition(entryId));
-            assertEq(remainingSupply, totalSupply - balance);
-            assertEq(shouldSweepDust, remainingSupply == 0);
+            assertEq(remainingSupply, totalSupply - balance, "Net position should decrease by balance");
+            assertEq(shouldSweepDust, remainingSupply == 0, "Should sweep dust only when no supply remains");
         } else {
-            assertEq(payout, 0);
-            assertFalse(shouldSweepDust);
-            assertEq(fromBasePool, 0);
-            assertEq(fromSubsidyPool, 0);
-            assertEq(uint256(testStorage.netPosition(entryId)), uint256(initialNetPosition));
+            assertEq(payout, 0, "Non-winning entry should have zero payout");
+            assertFalse(shouldSweepDust, "Should not sweep dust for non-winning entry");
+            assertEq(fromBasePool, 0, "Base pool reduction should be zero for non-winning entry");
+            assertEq(fromSubsidyPool, 0, "Subsidy pool reduction should be zero for non-winning entry");
+            assertEq(uint256(testStorage.netPosition(entryId)), uint256(initialNetPosition), "Net position should be unchanged for non-winning entry");
         }
     }
 
