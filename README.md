@@ -5,58 +5,25 @@ Combined competition format:
 - **Tournament Contest:** a traditional competition format with established profitability
 - **Prediction Market:** a betting mechanism layered on top of the tournament outcomes, also with proven profitability
 
-Why? Balancing & pooling incentives to become more than the sum of its parts:
+Why? By combining and balancing incentives, the system achieves more than either component could independently:
 
-- **Dynamic Incentives:** fluid movement of value between layers changes incentives in real-time, sparking interest and driving activity
-- **Recursive Positive Feedback**: both markets become more compelling as prize pools grow, which recursively attracts more participants and amplifies engagement
+<!-- Alternative options:
+- Why? The combination creates synergistic value beyond what each layer offers independently:
+- Why? Balancing & pooling incentives creates value greater than the sum of its parts:
+- Why? The integration amplifies incentives, producing outcomes that exceed what either layer achieves alone:
+- Why? By combining and balancing incentives, the system achieves more than either component could independently:
+- Why? The interplay between layers creates emergent value that transcends their individual contributions:
+  -->
 
-## Purpose and Functionality
-
-Contest Catalyst enables competitions where participants compete in a primary layer while spectators can predict outcomes in a secondary layer.
-
-**Primary Layer**: Fixed deposit competitions where participants enter with a set deposit amount. The oracle distributes prizes based on real-world results, and winners claim their payouts.
-
-**Secondary Layer**: Prediction market on primary outcomes using polynomial bonding curve pricing. Secondary participants buy ERC1155 tokens representing positions on primary entries. Key features:
-
-- Winner-take-all redemption based on primary results
-- Position bonuses: portion of secondary deposits go to primary entry owners
-- Dynamic cross-subsidy: balances prize pools between primary and secondary sides
-- Withdrawals allowed during OPEN phase only (full refund)
-
-## Architecture Overview
-
-The system uses a two-layer architecture with the oracle as an external mediator:
-
-```mermaid
-flowchart LR
-    Oracle[Oracle<br/>State Control]
-    Factory[ContestFactory]
-    Controller[ContestController<br/>ERC1155]
-    PrimaryLib[PrimaryContest<br/>Library]
-    SecondaryLib[SecondaryContest<br/>Library]
-    PricingLib[SecondaryPricing<br/>Library]
-
-    Oracle -->|State Transitions| Controller
-    Factory -->|Creates| Controller
-    Controller -->|Uses| PrimaryLib
-    Controller -->|Uses| SecondaryLib
-    SecondaryLib -->|Uses| PricingLib
-
-    Primary[Primary Participants<br/>Fixed Deposits]
-    Secondary[Secondary Participants<br/>Bonding Curve Market]
-
-    Primary -->|addPrimaryPosition| Controller
-    Secondary -->|addSecondaryPosition| Controller
-    Controller -->|ERC1155 Tokens| Secondary
-```
+- **Dynamic Incentives:** fluid movement of value between layers produces continuously changing incentives, sparking interest and driving activity
+- **Positive Feedback**: both markets become more compelling as prize pools grow which attracts more participants and amplifies engagement
 
 ### Contract Structure
 
 - **[ContestFactory](src/ContestFactory.sol)**: Factory for creating new contest instances
 - **[ContestController](src/ContestController.sol)**: Main orchestrator contract managing both layers
-  - Inherits ERC1155 for secondary position tokens
-  - Manages prize pools and cross-subsidies
   - Handles state transitions (oracle-controlled)
+  - Manages prize pools and cross-subsidies
 - **[PrimaryContest](src/PrimaryContest.sol)**: Library for primary mechanics (add/remove positions, claims)
 - **[SecondaryContest](src/SecondaryContest.sol)**: Library for secondary mechanics (position management, ERC1155 operations)
 - **[SecondaryPricing](src/SecondaryPricing.sol)**: Polynomial bonding curve pricing (`price = BASE_PRICE + COEFFICIENT * shares²`)
@@ -64,9 +31,9 @@ flowchart LR
 ### State Machine
 
 ```
-OPEN → ACTIVE → LOCKED → SETTLED
-  ↓              ↓
-CANCELLED      CLOSED
+OPEN → ACTIVE → LOCKED → SETTLED → CLOSED
+  ↓      ↓        ↓
+CANCELLED ←───────┘
 ```
 
 - **OPEN**: Primary participants join, secondary participants add positions, withdrawals allowed
@@ -75,6 +42,11 @@ CANCELLED      CLOSED
 - **SETTLED**: Results in, users claim payouts
 - **CANCELLED**: Contest cancelled, refunds available
 - **CLOSED**: Force distributed
+
+**Note on Cancellation & Expiry:**
+
+- Anyone can call `cancelExpired()` if the contest has passed its expiry timestamp and is not `SETTLED` or `CLOSED`
+- **In `CANCELLED` state**: Primary and secondary participants can withdraw their positions for full refunds (no deferred fees). No new positions can be added, and no payouts can be claimed.
 
 ## Quick Usage Guide
 
