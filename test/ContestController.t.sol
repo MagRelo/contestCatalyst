@@ -614,41 +614,112 @@ contract ContestControllerTest is Test {
         assertEq(contest.primaryPrizePoolPayouts(ENTRY_1), 0);
     }
     
-    function test_claimPrimaryPayout_IncludesBonus() public {
+    function test_claimPrimaryPayout_and_claimPositionBonus() public {
         _createPrimaryEntry(user1, ENTRY_1);
         _createPrimaryEntry(user2, ENTRY_2);
-        
+
         _fundUser(user3, PURCHASE_INCREMENT * 10);
         vm.prank(user3);
         contest.addSecondaryPosition(ENTRY_1, PURCHASE_INCREMENT * 10, new bytes32[](0));
-        
+
         vm.prank(oracle);
         contest.activateContest();
-        
+
         vm.prank(oracle);
         contest.lockContest();
-        
+
         uint256[] memory winners = new uint256[](2);
         winners[0] = ENTRY_1;
         winners[1] = ENTRY_2;
         uint256[] memory payouts = new uint256[](2);
         payouts[0] = 7000;
         payouts[1] = 3000;
-        
+
         vm.prank(oracle);
         contest.settleContest(winners, payouts);
-        
+
         uint256 payout = contest.primaryPrizePoolPayouts(ENTRY_1);
         uint256 bonus = contest.primaryPositionSubsidy(ENTRY_1);
-        uint256 grossClaim = payout + bonus;
-        uint256 netClaim = grossClaim - _calculateExpectedOracleFee(grossClaim);
+        uint256 netPrize = payout - _calculateExpectedOracleFee(payout);
+        uint256 netBonus = bonus - _calculateExpectedOracleFee(bonus);
         uint256 balanceBefore = paymentToken.balanceOf(user1);
-        
+
         vm.prank(user1);
         contest.claimPrimaryPayout(ENTRY_1);
-        
+        vm.prank(user1);
+        contest.claimPositionBonus(ENTRY_1);
+
         assertGt(bonus, 0);
-        assertEq(paymentToken.balanceOf(user1), balanceBefore + netClaim);
+        assertEq(paymentToken.balanceOf(user1), balanceBefore + netPrize + netBonus);
+    }
+
+    function test_claimPositionBonus_LoserWithBonus() public {
+        _createPrimaryEntry(user1, ENTRY_1);
+        _createPrimaryEntry(user2, ENTRY_2);
+
+        _fundUser(user3, PURCHASE_INCREMENT * 10);
+        vm.prank(user3);
+        contest.addSecondaryPosition(ENTRY_1, PURCHASE_INCREMENT * 10, new bytes32[](0));
+
+        vm.prank(oracle);
+        contest.activateContest();
+        vm.prank(oracle);
+        contest.lockContest();
+
+        uint256[] memory winners = new uint256[](1);
+        winners[0] = ENTRY_2;
+        uint256[] memory payouts = new uint256[](1);
+        payouts[0] = 10000;
+
+        vm.prank(oracle);
+        contest.settleContest(winners, payouts);
+
+        uint256 bonus = contest.primaryPositionSubsidy(ENTRY_1);
+        assertGt(bonus, 0);
+        assertEq(contest.primaryPrizePoolPayouts(ENTRY_1), 0);
+
+        uint256 netBonus = bonus - _calculateExpectedOracleFee(bonus);
+        uint256 balanceBefore = paymentToken.balanceOf(user1);
+
+        vm.prank(user1);
+        contest.claimPositionBonus(ENTRY_1);
+
+        assertEq(paymentToken.balanceOf(user1), balanceBefore + netBonus);
+    }
+
+    function test_claimPositionBonus_NoBonus() public {
+        _createPrimaryEntry(user1, ENTRY_1);
+        _createPrimaryEntry(user2, ENTRY_2);
+
+        vm.prank(oracle);
+        contest.activateContest();
+        vm.prank(oracle);
+        contest.lockContest();
+
+        uint256[] memory winners = new uint256[](2);
+        winners[0] = ENTRY_1;
+        winners[1] = ENTRY_2;
+        uint256[] memory payouts = new uint256[](2);
+        payouts[0] = 7000;
+        payouts[1] = 3000;
+
+        vm.prank(oracle);
+        contest.settleContest(winners, payouts);
+
+        vm.prank(user1);
+        vm.expectRevert("No position bonus");
+        contest.claimPositionBonus(ENTRY_1);
+    }
+
+    function test_claimPositionBonus_WrongState() public {
+        _createPrimaryEntry(user1, ENTRY_1);
+        _fundUser(user3, PURCHASE_INCREMENT * 10);
+        vm.prank(user3);
+        contest.addSecondaryPosition(ENTRY_1, PURCHASE_INCREMENT * 10, new bytes32[](0));
+
+        vm.prank(user1);
+        vm.expectRevert("Contest not settled");
+        contest.claimPositionBonus(ENTRY_1);
     }
     
     function test_claimPrimaryPayout_WrongState() public {
@@ -1649,39 +1720,41 @@ contract ContestControllerTest is Test {
         assertEq(contest.primaryPrizePoolPayouts(ENTRY_1), 0);
     }
     
-    function test_pushPrimaryPayouts_IncludesBonus() public {
+    function test_pushPrimaryPayouts_and_pushPositionBonuses() public {
         _createPrimaryEntry(user1, ENTRY_1);
         _createPrimaryEntry(user2, ENTRY_2);
         _createSecondaryPosition(user3, ENTRY_1, PURCHASE_INCREMENT * 10);
-        
+
         vm.prank(oracle);
         contest.activateContest();
         vm.prank(oracle);
         contest.lockContest();
-        
+
         uint256[] memory winners = new uint256[](2);
         winners[0] = ENTRY_1;
         winners[1] = ENTRY_2;
         uint256[] memory payouts = new uint256[](2);
         payouts[0] = 7000;
         payouts[1] = 3000;
-        
+
         vm.prank(oracle);
         contest.settleContest(winners, payouts);
-        
+
         uint256[] memory entryIds = new uint256[](1);
         entryIds[0] = ENTRY_1;
-        
+
         uint256 payout = contest.primaryPrizePoolPayouts(ENTRY_1);
         uint256 bonus = contest.primaryPositionSubsidy(ENTRY_1);
-        uint256 grossClaim = payout + bonus;
-        uint256 netClaim = grossClaim - _calculateExpectedOracleFee(grossClaim);
+        uint256 netPrize = payout - _calculateExpectedOracleFee(payout);
+        uint256 netBonus = bonus - _calculateExpectedOracleFee(bonus);
         uint256 balanceBefore = paymentToken.balanceOf(user1);
-        
+
         vm.prank(oracle);
         contest.pushPrimaryPayouts(entryIds);
-        
-        assertEq(paymentToken.balanceOf(user1), balanceBefore + netClaim);
+        vm.prank(oracle);
+        contest.pushPositionBonuses(entryIds);
+
+        assertEq(paymentToken.balanceOf(user1), balanceBefore + netPrize + netBonus);
     }
     
     function test_pushPrimaryPayouts_NotSettled() public {
@@ -2175,32 +2248,34 @@ contract ContestControllerTest is Test {
         _createPrimaryEntry(user1, ENTRY_1);
         _createPrimaryEntry(user2, ENTRY_2);
         _createSecondaryPosition(user3, ENTRY_1, PURCHASE_INCREMENT * 10);
-        
+
         vm.prank(oracle);
         contest.activateContest();
         vm.prank(oracle);
         contest.lockContest();
-        
+
         uint256[] memory winners = new uint256[](2);
         winners[0] = ENTRY_1;
         winners[1] = ENTRY_2;
         uint256[] memory payouts = new uint256[](2);
         payouts[0] = 7000;
         payouts[1] = 3000;
-        
+
         vm.prank(oracle);
         contest.settleContest(winners, payouts);
-        
+
         uint256 payout = contest.primaryPrizePoolPayouts(ENTRY_1);
         uint256 bonus = contest.primaryPositionSubsidy(ENTRY_1);
-        uint256 grossClaim = payout + bonus;
-        uint256 netClaim = grossClaim - _calculateExpectedOracleFee(grossClaim);
+        uint256 netPrize = payout - _calculateExpectedOracleFee(payout);
+        uint256 netBonus = bonus - _calculateExpectedOracleFee(bonus);
         uint256 balanceBefore = paymentToken.balanceOf(user1);
-        
+
         vm.prank(user1);
         contest.claimPrimaryPayout(ENTRY_1);
-        
-        assertEq(paymentToken.balanceOf(user1), balanceBefore + netClaim);
+        vm.prank(user1);
+        contest.claimPositionBonus(ENTRY_1);
+
+        assertEq(paymentToken.balanceOf(user1), balanceBefore + netPrize + netBonus);
     }
     
     function test_UX_ClearErrorMessages() public {

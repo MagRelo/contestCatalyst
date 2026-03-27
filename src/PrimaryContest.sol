@@ -81,25 +81,43 @@ library PrimaryContest {
     }
 
     /**
-     * @notice Validates that payout can be claimed
+     * @notice Validates that primary prize payout can be claimed
      * @param entryOwner Storage mapping of entry ID to owner
      * @param entryId Entry ID to validate
      * @param owner Address claiming to be owner
      * @param currentState Current contest state
-     * @param payout Prize pool payout for entry
-     * @param bonus Position bonus for entry
+     * @param payout Prize pool payout for entry (must be > 0)
      */
     function validateClaimPrimaryPayout(
         mapping(uint256 => address) storage entryOwner,
         uint256 entryId,
         address owner,
         uint8 currentState, // ContestState.SETTLED = 3
-        uint256 payout,
+        uint256 payout
+    ) internal view {
+        require(currentState == 3, "Contest not settled"); // ContestState.SETTLED
+        require(entryOwner[entryId] == owner, "Not entry owner");
+        require(payout > 0, "No payout");
+    }
+
+    /**
+     * @notice Validates that position bonus can be claimed (independent of prize outcome)
+     * @param entryOwner Storage mapping of entry ID to owner
+     * @param entryId Entry ID to validate
+     * @param owner Address claiming to be owner
+     * @param currentState Current contest state
+     * @param bonus Accumulated position bonus for entry (must be > 0)
+     */
+    function validateClaimPositionBonus(
+        mapping(uint256 => address) storage entryOwner,
+        uint256 entryId,
+        address owner,
+        uint8 currentState, // ContestState.SETTLED = 3
         uint256 bonus
     ) internal view {
         require(currentState == 3, "Contest not settled"); // ContestState.SETTLED
         require(entryOwner[entryId] == owner, "Not entry owner");
-        require(payout + bonus > 0, "No payout");
+        require(bonus > 0, "No position bonus");
     }
 
     /**
@@ -180,33 +198,30 @@ library PrimaryContest {
     }
 
     /**
-     * @notice Processes primary payout claim
+     * @notice Processes primary prize pool payout claim (Layer-1 prize only)
      * @param primaryPrizePoolPayouts Storage mapping of entry to payout amount
+     * @param entryId Entry ID to claim for
+     * @return payout Prize pool payout amount cleared from storage
+     */
+    function processClaimPrimaryPayout(mapping(uint256 => uint256) storage primaryPrizePoolPayouts, uint256 entryId)
+        internal
+        returns (uint256 payout)
+    {
+        payout = primaryPrizePoolPayouts[entryId];
+        primaryPrizePoolPayouts[entryId] = 0;
+    }
+
+    /**
+     * @notice Processes position bonus claim (secondary-deposit rewards; not tied to winning)
      * @param primaryPositionSubsidy Storage mapping of entry to position bonus
      * @param entryId Entry ID to claim for
-     * @return totalClaim Total amount to claim (payout + bonus)
-     * @return payout Prize pool payout amount
-     * @return bonus Position bonus amount
+     * @return bonus Position bonus amount cleared from storage
      */
-    function processClaimPrimaryPayout(
-        mapping(uint256 => uint256) storage primaryPrizePoolPayouts,
-        mapping(uint256 => uint256) storage primaryPositionSubsidy,
-        uint256 entryId
-    ) internal returns (
-        uint256 totalClaim,
-        uint256 payout,
-        uint256 bonus
-    ) {
-        payout = primaryPrizePoolPayouts[entryId];
+    function processClaimPositionBonus(mapping(uint256 => uint256) storage primaryPositionSubsidy, uint256 entryId)
+        internal
+        returns (uint256 bonus)
+    {
         bonus = primaryPositionSubsidy[entryId];
-        totalClaim = payout + bonus;
-
-        // Clear both payouts
-        primaryPrizePoolPayouts[entryId] = 0;
-        if (bonus > 0) {
-            primaryPositionSubsidy[entryId] = 0;
-        }
-
-        // Event is emitted by the controller with net amount paid to user.
+        primaryPositionSubsidy[entryId] = 0;
     }
 }

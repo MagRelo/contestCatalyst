@@ -154,6 +154,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
     event PrimaryPositionAdded(address indexed owner, uint256 indexed entryId);
     event PrimaryPositionRemoved(uint256 indexed entryId, address indexed owner);
     event PrimaryPayoutClaimed(address indexed owner, uint256 indexed entryId, uint256 amount);
+    event PositionBonusClaimed(address indexed recipient, uint256 indexed entryId, uint256 amount);
     event PrimaryMerkleRootUpdated(bytes32 newRoot);
 
     event SecondaryPositionAdded(
@@ -287,35 +288,17 @@ contract ContestController is ERC1155, ReentrancyGuard {
     }
 
     /**
-     * @notice User claims payout for a specific entry after settlement
+     * @notice User claims Layer-1 prize payout for a specific entry after settlement
      * @param entryId The entry to claim payout for
-     * @dev Pays both prize payout AND primary position bonus in one transaction
+     * @dev Position bonus is claimed separately via claimPositionBonus
      */
     function claimPrimaryPayout(uint256 entryId) external nonReentrant {
-        // Validate using library
         PrimaryContest.validateClaimPrimaryPayout(
-            entryOwner,
-            entryId,
-            msg.sender,
-            uint8(state),
-            primaryPrizePoolPayouts[entryId],
-            primaryPositionSubsidy[entryId]
+            entryOwner, entryId, msg.sender, uint8(state), primaryPrizePoolPayouts[entryId]
         );
 
-        // Process using library
-        (uint256 totalClaim, uint256 payout, uint256 bonus) = PrimaryContest.processClaimPrimaryPayout(
-            primaryPrizePoolPayouts,
-            primaryPositionSubsidy,
-            entryId
-        );
+        uint256 payout = PrimaryContest.processClaimPrimaryPayout(primaryPrizePoolPayouts, entryId);
 
-        // Update storage variables
-        if (bonus > 0) {
-            totalPrimaryPositionSubsidies -= bonus;
-        }
-
-        // Reduce pools by claimed amounts (forensic accounting integrity)
-        // Payouts come from primaryPrizePool + primaryPrizePoolSubsidy
         uint256 totalPrimaryFunds = primaryPrizePool + primaryPrizePoolSubsidy;
         if (totalPrimaryFunds > 0 && payout > 0) {
             uint256 fromBasePool = (payout * primaryPrizePool) / totalPrimaryFunds;
@@ -334,15 +317,37 @@ contract ContestController is ERC1155, ReentrancyGuard {
             }
         }
 
-        uint256 oracleFee = _calculateOracleFee(totalClaim);
-        uint256 netClaim = totalClaim - oracleFee;
+        uint256 oracleFee = _calculateOracleFee(payout);
+        uint256 netClaim = payout - oracleFee;
         if (oracleFee > 0) {
             accumulatedOracleFee += oracleFee;
         }
 
-        // Single transfer for both prize + bonus
         SafeTransferLib.safeTransfer(ERC20(paymentToken), msg.sender, netClaim);
         emit PrimaryPayoutClaimed(msg.sender, entryId, netClaim);
+    }
+
+    /**
+     * @notice User claims accumulated position bonus for an entry after settlement
+     * @param entryId The entry to claim bonus for
+     * @dev Independent of prize outcome; use claimPrimaryPayout for Layer-1 prize
+     */
+    function claimPositionBonus(uint256 entryId) external nonReentrant {
+        PrimaryContest.validateClaimPositionBonus(
+            entryOwner, entryId, msg.sender, uint8(state), primaryPositionSubsidy[entryId]
+        );
+
+        uint256 bonus = PrimaryContest.processClaimPositionBonus(primaryPositionSubsidy, entryId);
+        totalPrimaryPositionSubsidies -= bonus;
+
+        uint256 oracleFee = _calculateOracleFee(bonus);
+        uint256 netBonus = bonus - oracleFee;
+        if (oracleFee > 0) {
+            accumulatedOracleFee += oracleFee;
+        }
+
+        SafeTransferLib.safeTransfer(ERC20(paymentToken), msg.sender, netBonus);
+        emit PositionBonusClaimed(msg.sender, entryId, netBonus);
     }
 
     // ============ Layer 2: Secondary Functions ============
@@ -851,10 +856,10 @@ contract ContestController is ERC1155, ReentrancyGuard {
     // ============ Optional Push Functions (Convenience) ============
 
     /**
-     * @notice Push primary payouts (prize + bonus) to specific entries
+     * @notice Push primary prize payouts to specific entries (Layer-1 prize only)
      * @param entryIds Array of entry IDs to push payouts for
      * @dev Oracle can use this to help users who forgot to claim
-     * @dev Gas-efficient: oracle controls which entries to push
+     * @dev Use pushPositionBonuses for position bonus
      */
     function pushPrimaryPayouts(uint256[] calldata entryIds) external onlyOracle nonReentrant {
         require(state == ContestState.SETTLED, "Contest not settled");
@@ -865,37 +870,60 @@ contract ContestController is ERC1155, ReentrancyGuard {
             require(owner != address(0), "Entry withdrawn or invalid");
 
             uint256 payout = primaryPrizePoolPayouts[entryId];
-            uint256 bonus = primaryPositionSubsidy[entryId];
-            uint256 totalClaim = payout + bonus;
-
-            if (totalClaim > 0) {
-                primaryPrizePoolPayouts[entryId] = 0;
-                if (bonus > 0) {
-                    primaryPositionSubsidy[entryId] = 0;
-                    totalPrimaryPositionSubsidies -= bonus;
-                }
-
-                // Reduce pools proportionally (if payout > 0)
-                if (payout > 0) {
-                    uint256 totalPrimaryFunds = primaryPrizePool + primaryPrizePoolSubsidy;
-                    if (totalPrimaryFunds > 0) {
-                        uint256 fromBasePool = (payout * primaryPrizePool) / totalPrimaryFunds;
-                        uint256 fromSubsidyPool = payout - fromBasePool;
-
-                        primaryPrizePool = primaryPrizePool >= fromBasePool ? primaryPrizePool - fromBasePool : 0;
-                        primaryPrizePoolSubsidy =
-                            primaryPrizePoolSubsidy >= fromSubsidyPool ? primaryPrizePoolSubsidy - fromSubsidyPool : 0;
-                    }
-                }
-
-                uint256 oracleFee = _calculateOracleFee(totalClaim);
-                uint256 netClaim = totalClaim - oracleFee;
-                if (oracleFee > 0) {
-                    accumulatedOracleFee += oracleFee;
-                }
-                SafeTransferLib.safeTransfer(ERC20(paymentToken), owner, netClaim);
-                emit PrimaryPayoutClaimed(owner, entryId, netClaim);
+            if (payout == 0) {
+                continue;
             }
+
+            primaryPrizePoolPayouts[entryId] = 0;
+
+            uint256 totalPrimaryFunds = primaryPrizePool + primaryPrizePoolSubsidy;
+            if (totalPrimaryFunds > 0) {
+                uint256 fromBasePool = (payout * primaryPrizePool) / totalPrimaryFunds;
+                uint256 fromSubsidyPool = payout - fromBasePool;
+
+                primaryPrizePool = primaryPrizePool >= fromBasePool ? primaryPrizePool - fromBasePool : 0;
+                primaryPrizePoolSubsidy =
+                    primaryPrizePoolSubsidy >= fromSubsidyPool ? primaryPrizePoolSubsidy - fromSubsidyPool : 0;
+            }
+
+            uint256 oracleFee = _calculateOracleFee(payout);
+            uint256 netClaim = payout - oracleFee;
+            if (oracleFee > 0) {
+                accumulatedOracleFee += oracleFee;
+            }
+            SafeTransferLib.safeTransfer(ERC20(paymentToken), owner, netClaim);
+            emit PrimaryPayoutClaimed(owner, entryId, netClaim);
+        }
+    }
+
+    /**
+     * @notice Push position bonuses to specific entries
+     * @param entryIds Array of entry IDs to push bonuses for
+     * @dev Oracle can use this alongside pushPrimaryPayouts
+     */
+    function pushPositionBonuses(uint256[] calldata entryIds) external onlyOracle nonReentrant {
+        require(state == ContestState.SETTLED, "Contest not settled");
+
+        for (uint256 i = 0; i < entryIds.length; i++) {
+            uint256 entryId = entryIds[i];
+            address owner = entryOwner[entryId];
+            require(owner != address(0), "Entry withdrawn or invalid");
+
+            uint256 bonus = primaryPositionSubsidy[entryId];
+            if (bonus == 0) {
+                continue;
+            }
+
+            primaryPositionSubsidy[entryId] = 0;
+            totalPrimaryPositionSubsidies -= bonus;
+
+            uint256 oracleFee = _calculateOracleFee(bonus);
+            uint256 netBonus = bonus - oracleFee;
+            if (oracleFee > 0) {
+                accumulatedOracleFee += oracleFee;
+            }
+            SafeTransferLib.safeTransfer(ERC20(paymentToken), owner, netBonus);
+            emit PositionBonusClaimed(owner, entryId, netBonus);
         }
     }
 

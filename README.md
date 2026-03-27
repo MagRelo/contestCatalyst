@@ -60,8 +60,9 @@ contest.addPrimaryPosition(entryId, merkleProof);
 // Remove position during OPEN phase (full refund)
 contest.removePrimaryPosition(entryId);
 
-// Claim payout after settlement
+// After settlement: claim Layer-1 prize and position bonus separately (each net of oracle fee)
 contest.claimPrimaryPayout(entryId);
+contest.claimPositionBonus(entryId);
 ```
 
 ### Secondary Participants
@@ -87,6 +88,7 @@ contest.settleContest(winningEntries, payoutBps);  // LOCKED → SETTLED
 
 // Optional: Push payouts for efficiency
 contest.pushPrimaryPayouts(entryIds);
+contest.pushPositionBonuses(entryIds);
 contest.pushSecondaryPayouts(participantAddresses, entryId);
 
 // Other oracle functions
