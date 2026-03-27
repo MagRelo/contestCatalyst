@@ -110,7 +110,6 @@ library PrimaryContest {
      * @param entryId Entry ID to add
      * @param owner Address of the primary participant
      * @param primaryDepositAmount Fixed deposit amount
-     * @param oracleFee Oracle fee deducted from deposit
      * @param crossSubsidy Cross-subsidy amount redirected to secondary pool
      * @return primaryContribution Amount contributed to primary prize pool
      */
@@ -121,14 +120,12 @@ library PrimaryContest {
         uint256 entryId,
         address owner,
         uint256 primaryDepositAmount,
-        uint256 oracleFee,
         uint256 crossSubsidy
     ) internal returns (uint256 primaryContribution) {
         entries.push(entryId);
         entryOwner[entryId] = owner;
 
-        uint256 netAmount = primaryDepositAmount - oracleFee;
-        primaryContribution = netAmount - crossSubsidy;
+        primaryContribution = primaryDepositAmount - crossSubsidy;
 
         if (crossSubsidy > 0) {
             primaryToSecondarySubsidy[entryId] = crossSubsidy;
@@ -144,7 +141,6 @@ library PrimaryContest {
      * @param primaryPositionSubsidy Storage mapping of entry to position bonus
      * @param entryId Entry ID to remove
      * @param primaryDepositAmount Fixed deposit amount
-     * @param oracleFee Oracle fee to reverse
      * @return refundAmount Full refund amount (primaryDepositAmount)
      * @return primaryContribution Amount to subtract from primary prize pool
      * @return crossSubsidy Cross-subsidy to reverse
@@ -155,8 +151,7 @@ library PrimaryContest {
         mapping(uint256 => uint256) storage primaryToSecondarySubsidy,
         mapping(uint256 => uint256) storage primaryPositionSubsidy,
         uint256 entryId,
-        uint256 primaryDepositAmount,
-        uint256 oracleFee
+        uint256 primaryDepositAmount
     ) internal returns (
         uint256 refundAmount,
         uint256 primaryContribution,
@@ -167,9 +162,8 @@ library PrimaryContest {
         address owner = entryOwner[entryId];
         entryOwner[entryId] = address(0);
 
-        uint256 netAmount = primaryDepositAmount - oracleFee;
         crossSubsidy = primaryToSecondarySubsidy[entryId];
-        primaryContribution = netAmount - crossSubsidy;
+        primaryContribution = primaryDepositAmount - crossSubsidy;
 
         if (crossSubsidy > 0) {
             primaryToSecondarySubsidy[entryId] = 0;
@@ -190,7 +184,6 @@ library PrimaryContest {
      * @param primaryPrizePoolPayouts Storage mapping of entry to payout amount
      * @param primaryPositionSubsidy Storage mapping of entry to position bonus
      * @param entryId Entry ID to claim for
-     * @param owner Address claiming payout
      * @return totalClaim Total amount to claim (payout + bonus)
      * @return payout Prize pool payout amount
      * @return bonus Position bonus amount
@@ -198,8 +191,7 @@ library PrimaryContest {
     function processClaimPrimaryPayout(
         mapping(uint256 => uint256) storage primaryPrizePoolPayouts,
         mapping(uint256 => uint256) storage primaryPositionSubsidy,
-        uint256 entryId,
-        address owner
+        uint256 entryId
     ) internal returns (
         uint256 totalClaim,
         uint256 payout,
@@ -215,6 +207,6 @@ library PrimaryContest {
             primaryPositionSubsidy[entryId] = 0;
         }
 
-        emit PrimaryPayoutClaimed(owner, entryId, totalClaim);
+        // Event is emitted by the controller with net amount paid to user.
     }
 }

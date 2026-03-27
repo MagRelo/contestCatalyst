@@ -207,7 +207,6 @@ library SecondaryContest {
      * @notice Processes secondary payout claim
      * @param netPosition Storage mapping of entry to net position
      * @param entryId Entry ID to claim for
-     * @param participant Address claiming payout
      * @param balance User's token balance
      * @param secondaryWinningEntry Winning entry ID
      * @param secondaryPrizePool Current secondary prize pool
@@ -221,7 +220,6 @@ library SecondaryContest {
     function processClaimSecondaryPayout(
         mapping(uint256 => int256) storage netPosition,
         uint256 entryId,
-        address participant,
         uint256 balance,
         uint256 secondaryWinningEntry,
         uint256 secondaryPrizePool,
@@ -257,6 +255,5 @@ library SecondaryContest {
             }
         }
 
-        emit SecondaryPayoutClaimed(participant, entryId, payout);
     }
 }

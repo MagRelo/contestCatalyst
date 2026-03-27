@@ -19,15 +19,15 @@ This analysis uses the following contest settings:
 
 This document analyzes when additional betting on a single entry becomes economically prohibitive due to the quadratic bonding curve pricing mechanism with `COEFFICIENT = 1`.
 
-**Note:** This analysis is based on the current configuration with 5 primary entries ($125 total deposited, $118.75 in primary prize pool after 5% oracle fees), 30% target primary share, 5% oracle fee, and 15% maximum cross-subsidy. All results were generated from actual test runs.
+**Note:** This analysis is based on the current configuration with 5 primary entries ($125 total deposited into the primary side before claims), 30% target primary share, 5% oracle fee, and 15% maximum cross-subsidy. All results were generated from actual test runs.
 
 ## Test Setup
 
 - **Initial Configuration:**
   - **5 primary entries created** ($25 per entry = $125 total deposited)
-  - **Primary prize pool:** $118.75 (5 × $25 - 5% oracle fees = $125 - $6.25)
+  - **Primary prize pool:** starts from gross primary deposits and then evolves with cross-subsidies/claims
   - **Each primary entry bets $20 on themselves** ($20 × 5 = $100 total in secondary prize pool)
-  - **Initial pool distribution:** Primary: $118.75, Secondary: $108.06 (after fees and cross-subsidies)
+  - **Initial pool distribution:** Primary/Secondary balances are shaped by deposits and cross-subsidies
   - **Cross-subsidy behavior:** Subsidies flow to balance pools toward 30% primary target
   - **Entry 1 initial state:** 18.05 tokens, 20% ownership (equal bets on all 5 entries)
   - **Two bettors alternate $10 purchases** on Entry 1, competing for ownership
@@ -54,7 +54,7 @@ Both bettors eventually reach break-even, demonstrating that competition doesn't
 
 ### Initial State
 
-- **Primary prize pool:** $118.75 (5 × $25 - 5% oracle fees = $125 - $6.25)
+- **Primary prize pool:** starts from gross primary deposits and then moves with subsidies/claims
 - **Secondary prize pool:** $108.06 (from $100 in bets + cross-subsidies)
 - **Entry 1 shares:** 18.05 tokens (from initial $20 bet by Entry 1 owner)
 - **Entry 1 ownership:** 20% (equal bets on all 5 entries: $20 each)
@@ -327,19 +327,17 @@ In this analysis, since primary starts at 20% (below 30% target), cross-subsidie
 
 When a user makes a secondary purchase, the payment is split as follows:
 
-1. **Oracle fee (5%)** → `accumulatedOracleFee` (goes to oracle)
-2. **Position bonus (5% of amount after fee)** → `totalPrimaryPositionSubsidies` (goes to entry owner as reward for popularity)
-3. **Cross-subsidy (variable, up to 15%)** → `primaryPrizePoolSubsidy` (goes to PRIMARY prize pool to balance pools toward 30% target)
-4. **Collateral (remainder)** → `secondaryPrizePool` (goes to SECONDARY prize pool, backs the tokens)
+1. **Position bonus (5%)** → `totalPrimaryPositionSubsidies` (goes to entry owner as reward for popularity)
+2. **Cross-subsidy (variable, up to 15%)** → `primaryPrizePoolSubsidy` (goes to PRIMARY prize pool to balance pools toward 30% target)
+3. **Collateral (remainder)** → `secondaryPrizePool` (goes to SECONDARY prize pool, backs the tokens)
+4. **Oracle fee timing** → fees are deducted later from settled payout flows (`claim*`/`push*`), then accumulated in `accumulatedOracleFee`
 
 **Example for a $10 purchase:**
 
-- Oracle fee: $0.50 (5%)
-- Amount after fee: $9.50
-- Position bonus: $0.48 (5% of $9.50)
-- Remaining: $9.02
-- Cross-subsidy: ~$1.35 (up to 15% of remaining, variable based on pool balance toward 30% target)
-- **Collateral: ~$7.67** (goes to secondary prize pool)
+- Position bonus: $0.50 (5% of $10)
+- Remaining: $9.50
+- Cross-subsidy: up to $1.43 (15% cap on remaining, variable based on pool balance toward 30% target)
+- **Collateral: remainder after bonus and subsidy** (goes to secondary prize pool)
 
 So only approximately **~77% of each payment** (after accounting for fees and subsidies) goes into the secondary prize pool that backs the tokens. This explains why:
 
@@ -348,8 +346,8 @@ So only approximately **~77% of each payment** (after accounting for fees and su
 
 The remaining funds are distributed to:
 
-- Oracle fees: ~$36.25 (5% of $725)
-- Position bonuses: ~$34.44 (5% of $688.75 after fees)
+- Oracle fees: accrued later from settled payout flows
+- Position bonuses: accumulated during deposits
 - Cross-subsidies: Variable (flows from primary to secondary to reach 30% target, visible in initial $108.06 pot being higher than $100 in bets)
 
 ## Conclusion

@@ -145,7 +145,7 @@ contract TestStorage {
 
     function processClaimSecondaryPayout(
         uint256 entryId,
-        address participant,
+        address /* participant */,
         uint256 balance,
         uint256 availableBalance
     ) external returns (
@@ -157,7 +157,6 @@ contract TestStorage {
         return SecondaryContest.processClaimSecondaryPayout(
             netPosition,
             entryId,
-            participant,
             balance,
             secondaryWinningEntry,
             secondaryPrizePool,
@@ -1512,9 +1511,6 @@ contract SecondaryContestTest is Test {
         uint256 balance = TOKENS_1; // 50e18 (50% of supply)
         uint256 availableBalance = 2000e18;
         
-        vm.expectEmit(true, true, false, false);
-        emit SecondaryContest.SecondaryPayoutClaimed(participant1, ENTRY_1, 750e18);
-        
         (uint256 payout, bool shouldSweepDust, uint256 fromBasePool, uint256 fromSubsidyPool) =
             testStorage.processClaimSecondaryPayout(
                 ENTRY_1,
@@ -1562,9 +1558,6 @@ contract SecondaryContestTest is Test {
         
         uint256 balance = TOKENS_1;
         uint256 availableBalance = 2000e18;
-        
-        vm.expectEmit(true, true, false, false);
-        emit SecondaryContest.SecondaryPayoutClaimed(participant1, ENTRY_1, 0);
         
         (uint256 payout, bool shouldSweepDust, uint256 fromBasePool, uint256 fromSubsidyPool) =
             testStorage.processClaimSecondaryPayout(

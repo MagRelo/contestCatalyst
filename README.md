@@ -46,7 +46,8 @@ CANCELLED ←───────┘
 **Note on Cancellation & Expiry:**
 
 - Anyone can call `cancelExpired()` if the contest has passed its expiry timestamp and is not `SETTLED` or `CLOSED`
-- **In `CANCELLED` state**: Primary and secondary participants can withdraw their positions for full refunds (no deferred fees). No new positions can be added, and no payouts can be claimed.
+- **In `CANCELLED` state**: Primary and secondary participants can withdraw their positions for full refunds (no oracle fee on remove/refund). No new positions can be added, and no payouts can be claimed.
+- Oracle fees are deducted on settled payout flows (`claim*` and `push*`) and then claimed through `claimOracleFee()`.
 
 ## Quick Usage Guide
 

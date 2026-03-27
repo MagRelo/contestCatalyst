@@ -269,21 +269,18 @@ Early buyers purchase, then whale makes large purchase.
 
 When a secondary participant makes a deposit, the funds are allocated as follows:
 
-1. **Oracle Fee**: 5% of deposit (500 basis points) - goes to oracle
-2. **Position Bonus**: 5% of remaining amount (500 basis points) - goes to entry owner
-3. **Cross-Subsidy**: Up to 15% of remaining amount (1500 basis points) - dynamically allocated to balance primary/secondary pools toward 30% target
-4. **Collateral**: Remaining amount - backs ERC1155 tokens and determines pricing
+1. **Position Bonus**: 5% of deposit (500 basis points) - goes to entry owner
+2. **Cross-Subsidy**: Up to 15% of remaining amount (1500 basis points) - dynamically allocated to balance primary/secondary pools toward 30% target
+3. **Collateral**: Remaining amount - backs ERC1155 tokens and determines pricing
 
 **Example for $100 deposit:**
 
-- Oracle fee: $5.00
-- After fee: $95.00
-- Position bonus: $4.75 (5% of $95)
-- After bonus: $90.25
-- Cross-subsidy: ~$13.54 (15% of $90.25, if needed to balance pools)
-- Collateral: ~$76.71 (remaining amount used for token purchase)
+- Position bonus: $5.00 (5% of $100)
+- Remaining after bonus: $95.00
+- Cross-subsidy: ~$14.25 (15% of $95.00, if needed to balance pools)
+- Collateral: ~$80.75 (remaining amount used for token purchase)
 
-The collateral amount is what actually goes into the bonding curve pricing calculation, meaning more tokens are received per dollar compared to previous settings with higher fees.
+The collateral amount is what actually goes into the bonding curve pricing calculation. Oracle fees are deducted later on settled payout flows (`claim*`/`push*`), not at deposit time.
 
 ## Parameters
 

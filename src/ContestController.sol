@@ -230,12 +230,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
         PrimaryContest.validatePrimaryMerkleProof(primaryMerkleRoot, msg.sender, merkleProof);
         PrimaryContest.validateAddPrimaryPosition(entryOwner, entryId, expiryTimestamp, uint8(state));
 
-        // Deduct oracle fee
-        uint256 oracleFee = _calculateOracleFee(primaryDepositAmount);
-        accumulatedOracleFee += oracleFee;
-
-        uint256 netAmount = primaryDepositAmount - oracleFee;
-        uint256 crossSubsidy = _calculatePrimaryCrossSubsidy(netAmount);
+        uint256 crossSubsidy = _calculatePrimaryCrossSubsidy(primaryDepositAmount);
 
         // Process using library
         uint256 primaryContribution = PrimaryContest.processAddPrimaryPosition(
@@ -245,7 +240,6 @@ contract ContestController is ERC1155, ReentrancyGuard {
             entryId,
             msg.sender,
             primaryDepositAmount,
-            oracleFee,
             crossSubsidy
         );
 
@@ -268,10 +262,6 @@ contract ContestController is ERC1155, ReentrancyGuard {
         // Validate using library
         PrimaryContest.validateRemovePrimaryPosition(entryOwner, entryId, msg.sender, uint8(state));
 
-        // Reverse oracle fee
-        uint256 oracleFee = _calculateOracleFee(primaryDepositAmount);
-        accumulatedOracleFee -= oracleFee;
-
         // Process using library
         (uint256 refundAmount, uint256 primaryContribution, uint256 crossSubsidy, uint256 bonus) = 
             PrimaryContest.processRemovePrimaryPosition(
@@ -279,8 +269,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
                 primaryToSecondarySubsidy,
                 primaryPositionSubsidy,
                 entryId,
-                primaryDepositAmount,
-                oracleFee
+                primaryDepositAmount
             );
 
         // Update storage variables
@@ -317,8 +306,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
         (uint256 totalClaim, uint256 payout, uint256 bonus) = PrimaryContest.processClaimPrimaryPayout(
             primaryPrizePoolPayouts,
             primaryPositionSubsidy,
-            entryId,
-            msg.sender
+            entryId
         );
 
         // Update storage variables
@@ -346,8 +334,15 @@ contract ContestController is ERC1155, ReentrancyGuard {
             }
         }
 
+        uint256 oracleFee = _calculateOracleFee(totalClaim);
+        uint256 netClaim = totalClaim - oracleFee;
+        if (oracleFee > 0) {
+            accumulatedOracleFee += oracleFee;
+        }
+
         // Single transfer for both prize + bonus
-        SafeTransferLib.safeTransfer(ERC20(paymentToken), msg.sender, totalClaim);
+        SafeTransferLib.safeTransfer(ERC20(paymentToken), msg.sender, netClaim);
+        emit PrimaryPayoutClaimed(msg.sender, entryId, netClaim);
     }
 
     // ============ Layer 2: Secondary Functions ============
@@ -357,7 +352,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
      * @param entryId Entry ID to add position on
      * @param amount Amount of payment token to deposit
      * @param merkleProof Merkle proof for whitelist verification (empty array if no gating)
-     * @dev Deposit flow: oracle fee → position bonus (to entry owner) → cross-subsidy (dynamic) → collateral (backs ERC1155)
+     * @dev Deposit flow: position bonus (to entry owner) → cross-subsidy (dynamic) → collateral (backs ERC1155)
      * @dev Uses polynomial bonding curve pricing - popular entries cost more
      * @dev Reverts if payment is too small to purchase at least 1 token (prevents user money loss)
      */
@@ -369,14 +364,9 @@ contract ContestController is ERC1155, ReentrancyGuard {
         SecondaryContest.validateSecondaryMerkleProof(secondaryMerkleRoot, msg.sender, merkleProof);
         SecondaryContest.validateAddSecondaryPosition(entryOwner, entryId, amount, uint8(state));
 
-        // Deduct oracle fee first
-        uint256 oracleFee = _calculateOracleFee(amount);
-        accumulatedOracleFee += oracleFee;
-        uint256 amountAfterFee = amount - oracleFee;
-
         // Step 1: Allocate position bonus to entry owner (direct reward for being popular)
-        uint256 positionBonus = (amountAfterFee * positionBonusShareBps) / BPS_DENOMINATOR;
-        uint256 remainingAmount = amountAfterFee - positionBonus;
+        uint256 positionBonus = (amount * positionBonusShareBps) / BPS_DENOMINATOR;
+        uint256 remainingAmount = amount - positionBonus;
 
         // Step 2: Apply cross-subsidy calculation to remaining amount
         uint256 crossSubsidy = _calculateSecondaryCrossSubsidy(remainingAmount);
@@ -455,14 +445,9 @@ contract ContestController is ERC1155, ReentrancyGuard {
         uint256 depositedOnEntry = secondaryDepositedPerEntry[msg.sender][entryId];
         uint256 refundAmount = (depositedOnEntry * tokenAmount) / userTotalTokens;
 
-        // Reverse oracle fee
-        uint256 oracleFee = _calculateOracleFee(refundAmount);
-        accumulatedOracleFee -= oracleFee;
-        uint256 amountAfterFee = refundAmount - oracleFee;
-
         // Step 1: Reverse position bonus allocation
-        uint256 positionBonus = (amountAfterFee * positionBonusShareBps) / BPS_DENOMINATOR;
-        uint256 remainingAmount = amountAfterFee - positionBonus;
+        uint256 positionBonus = (refundAmount * positionBonusShareBps) / BPS_DENOMINATOR;
+        uint256 remainingAmount = refundAmount - positionBonus;
 
         // Step 2: Reverse cross-subsidy from remaining amount
         uint256 userCrossSubsidy = secondaryToPrimarySubsidy[msg.sender][entryId];
@@ -545,7 +530,6 @@ contract ContestController is ERC1155, ReentrancyGuard {
             SecondaryContest.processClaimSecondaryPayout(
                 netPosition,
                 entryId,
-                msg.sender,
                 balance,
                 secondaryWinningEntry,
                 secondaryPrizePool,
@@ -569,16 +553,25 @@ contract ContestController is ERC1155, ReentrancyGuard {
         }
 
         if (payout > 0) {
-            SafeTransferLib.safeTransfer(ERC20(paymentToken), msg.sender, payout);
+            uint256 oracleFee = _calculateOracleFee(payout);
+            uint256 netPayout = payout - oracleFee;
+            if (oracleFee > 0) {
+                accumulatedOracleFee += oracleFee;
+            }
+            SafeTransferLib.safeTransfer(ERC20(paymentToken), msg.sender, netPayout);
+            emit SecondaryPayoutClaimed(msg.sender, entryId, netPayout);
+        } else {
+            emit SecondaryPayoutClaimed(msg.sender, entryId, 0);
         }
 
         // If this was the last claim (no supply remains), sweep any dust to the last claimant
         if (shouldSweepDust) {
             uint256 remaining = IERC20Balance(paymentToken).balanceOf(address(this));
-            if (remaining > 0) {
+            uint256 sweepable = remaining > accumulatedOracleFee ? remaining - accumulatedOracleFee : 0;
+            if (sweepable > 0) {
                 secondaryPrizePool = 0;
                 secondaryPrizePoolSubsidy = 0;
-                SafeTransferLib.safeTransfer(ERC20(paymentToken), msg.sender, remaining);
+                SafeTransferLib.safeTransfer(ERC20(paymentToken), msg.sender, sweepable);
             }
         }
     }
@@ -895,8 +888,13 @@ contract ContestController is ERC1155, ReentrancyGuard {
                     }
                 }
 
-                SafeTransferLib.safeTransfer(ERC20(paymentToken), owner, totalClaim);
-                emit PrimaryPayoutClaimed(owner, entryId, totalClaim);
+                uint256 oracleFee = _calculateOracleFee(totalClaim);
+                uint256 netClaim = totalClaim - oracleFee;
+                if (oracleFee > 0) {
+                    accumulatedOracleFee += oracleFee;
+                }
+                SafeTransferLib.safeTransfer(ERC20(paymentToken), owner, netClaim);
+                emit PrimaryPayoutClaimed(owner, entryId, netClaim);
             }
         }
     }
@@ -950,8 +948,13 @@ contract ContestController is ERC1155, ReentrancyGuard {
                             secondaryPrizePoolSubsidy = 0;
                         }
                     }
-                    SafeTransferLib.safeTransfer(ERC20(paymentToken), participant, payout);
-                    emit SecondaryPayoutClaimed(participant, entryId, payout);
+                    uint256 oracleFee = _calculateOracleFee(payout);
+                    uint256 netPayout = payout - oracleFee;
+                    if (oracleFee > 0) {
+                        accumulatedOracleFee += oracleFee;
+                    }
+                    SafeTransferLib.safeTransfer(ERC20(paymentToken), participant, netPayout);
+                    emit SecondaryPayoutClaimed(participant, entryId, netPayout);
                 }
             }
         }
@@ -960,9 +963,8 @@ contract ContestController is ERC1155, ReentrancyGuard {
     // ============ View Functions ============
 
     /// @notice Returns the URI for a given token ID (ERC1155 requirement)
-    /// @param id Token ID (entry ID)
     /// @return Empty string (no metadata URI)
-    function uri(uint256 id) public view override returns (string memory) {
+    function uri(uint256) public pure override returns (string memory) {
         return "";
     }
 

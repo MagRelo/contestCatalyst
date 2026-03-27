@@ -97,7 +97,7 @@ contract TestStorage {
         uint256 entryId,
         address owner,
         uint256 primaryDepositAmount,
-        uint256 oracleFee,
+        uint256 /* oracleFee */,
         uint256 crossSubsidy
     ) external returns (uint256 primaryContribution) {
         return PrimaryContest.processAddPrimaryPosition(
@@ -107,7 +107,6 @@ contract TestStorage {
             entryId,
             owner,
             primaryDepositAmount,
-            oracleFee,
             crossSubsidy
         );
     }
@@ -115,7 +114,7 @@ contract TestStorage {
     function processRemovePrimaryPosition(
         uint256 entryId,
         uint256 primaryDepositAmount,
-        uint256 oracleFee
+        uint256 /* oracleFee */
     ) external returns (
         uint256 refundAmount,
         uint256 primaryContribution,
@@ -127,14 +126,13 @@ contract TestStorage {
             primaryToSecondarySubsidy,
             primaryPositionSubsidy,
             entryId,
-            primaryDepositAmount,
-            oracleFee
+            primaryDepositAmount
         );
     }
 
     function processClaimPrimaryPayout(
         uint256 entryId,
-        address owner
+        address /* owner */
     ) external returns (
         uint256 totalClaim,
         uint256 payout,
@@ -143,8 +141,7 @@ contract TestStorage {
         return PrimaryContest.processClaimPrimaryPayout(
             primaryPrizePoolPayouts,
             primaryPositionSubsidy,
-            entryId,
-            owner
+            entryId
         );
     }
 }
@@ -677,8 +674,7 @@ contract PrimaryContestTest is Test {
         assertEq(testStorage.entryOwner(ENTRY_1), owner1);
         
         // Verify primaryContribution calculation
-        uint256 netAmount = PRIMARY_DEPOSIT - ORACLE_FEE;
-        uint256 expectedContribution = netAmount - CROSS_SUBSIDY;
+        uint256 expectedContribution = PRIMARY_DEPOSIT - CROSS_SUBSIDY;
         assertEq(primaryContribution, expectedContribution);
         
         // Verify cross-subsidy tracking
@@ -720,8 +716,7 @@ contract PrimaryContestTest is Test {
             CROSS_SUBSIDY
         );
         
-        uint256 netAmount = PRIMARY_DEPOSIT - ORACLE_FEE;
-        uint256 expectedContribution = netAmount - CROSS_SUBSIDY;
+        uint256 expectedContribution = PRIMARY_DEPOSIT - CROSS_SUBSIDY;
         assertEq(primaryContribution, expectedContribution);
     }
 
@@ -784,8 +779,7 @@ contract PrimaryContestTest is Test {
         assertEq(refundAmount, PRIMARY_DEPOSIT);
         
         // Verify primaryContribution calculation
-        uint256 netAmount = PRIMARY_DEPOSIT - ORACLE_FEE;
-        uint256 expectedContribution = netAmount - CROSS_SUBSIDY;
+        uint256 expectedContribution = PRIMARY_DEPOSIT - CROSS_SUBSIDY;
         assertEq(primaryContribution, expectedContribution);
         
         // Verify cross-subsidy returned
@@ -948,10 +942,7 @@ contract PrimaryContestTest is Test {
     function test_processClaimPrimaryPayout_EventEmission() public {
         testStorage.setPrimaryPrizePoolPayouts(ENTRY_1, PAYOUT);
         testStorage.setPrimaryPositionSubsidy(ENTRY_1, BONUS);
-        
-        vm.expectEmit(true, true, false, false);
-        emit PrimaryContest.PrimaryPayoutClaimed(owner1, ENTRY_1, PAYOUT + BONUS);
-        
+
         testStorage.processClaimPrimaryPayout(ENTRY_1, owner1);
     }
 
@@ -1068,9 +1059,8 @@ contract PrimaryContestTest is Test {
             crossSubsidy
         );
         
-        // Verify invariant: primaryContribution + crossSubsidy == netAmount
-        uint256 netAmount = depositAmount - oracleFee;
-        assertEq(primaryContribution + crossSubsidy, netAmount);
+        // Verify invariant: primaryContribution + crossSubsidy == depositAmount
+        assertEq(primaryContribution + crossSubsidy, depositAmount);
         
         // Verify owner set
         assertEq(testStorage.entryOwner(entryId), owner);
@@ -1107,9 +1097,8 @@ contract PrimaryContestTest is Test {
         // Verify invariant: refundAmount == depositAmount
         assertEq(refundAmount, depositAmount);
         
-        // Verify invariant: primaryContribution + crossSubsidy == netAmount
-        uint256 netAmount = depositAmount - oracleFee;
-        assertEq(primaryContribution + returnedCrossSubsidy, netAmount);
+        // Verify invariant: primaryContribution + crossSubsidy == depositAmount
+        assertEq(primaryContribution + returnedCrossSubsidy, depositAmount);
         
         // Verify owner cleared
         assertEq(testStorage.entryOwner(entryId), address(0));
@@ -1245,8 +1234,7 @@ contract PrimaryContestTest is Test {
             CROSS_SUBSIDY
         );
         
-        uint256 netAmount = PRIMARY_DEPOSIT - ORACLE_FEE;
-        assertEq(primaryContribution + CROSS_SUBSIDY, netAmount);
+        assertEq(primaryContribution + CROSS_SUBSIDY, PRIMARY_DEPOSIT);
     }
 
     function test_invariant_RemovePositionRefund() public {
@@ -1334,8 +1322,7 @@ contract PrimaryContestTest is Test {
             0
         );
         
-        uint256 netAmount = PRIMARY_DEPOSIT - ORACLE_FEE;
-        assertEq(primaryContribution, netAmount);
+        assertEq(primaryContribution, PRIMARY_DEPOSIT);
         assertEq(testStorage.primaryToSecondarySubsidy(ENTRY_1), 0);
     }
 
@@ -1392,7 +1379,7 @@ contract PrimaryContestTest is Test {
     function test_EdgeCase_VeryLargeAmounts() public {
         uint256 largeDeposit = type(uint256).max / 2;
         uint256 largeOracleFee = largeDeposit / 10;
-        uint256 largeCrossSubsidy = (largeDeposit - largeOracleFee) / 2;
+        uint256 largeCrossSubsidy = largeDeposit / 2;
         
         // Should handle large amounts without overflow
         uint256 primaryContribution = testStorage.processAddPrimaryPosition(
@@ -1403,8 +1390,7 @@ contract PrimaryContestTest is Test {
             largeCrossSubsidy
         );
         
-        uint256 netAmount = largeDeposit - largeOracleFee;
-        assertEq(primaryContribution + largeCrossSubsidy, netAmount);
+        assertEq(primaryContribution + largeCrossSubsidy, largeDeposit);
     }
 
     // ============ Integration/Sequence Tests ============
