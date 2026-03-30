@@ -830,6 +830,34 @@ contract ContestControllerTest is Test {
         assertEq(contest.balanceOf(user2, ENTRY_1), 0);
         assertEq(paymentToken.balanceOf(user2), balanceBefore + expectedOut);
     }
+
+    function test_secondaryDepositedPerEntry_addAndPartialRemove() public {
+        _createPrimaryEntry(user1, ENTRY_1);
+
+        uint256 amount = PURCHASE_INCREMENT;
+        uint256 investmentAmount = (amount * PRIMARY_ENTRY_INVESTMENT_SHARE_BPS) / 10000;
+        uint256 remainingAmount = amount - investmentAmount;
+
+        _createSecondaryPosition(user2, ENTRY_1, amount);
+
+        // Buyer gets the buyer-leg collateral, and entry owner gets the owner-leg collateral.
+        assertEq(contest.secondaryDepositedPerEntry(user2, ENTRY_1), remainingAmount);
+        assertEq(contest.secondaryDepositedPerEntry(user1, ENTRY_1), investmentAmount);
+
+        uint256 userBalBefore = contest.balanceOf(user2, ENTRY_1);
+        uint256 tokenToSell = userBalBefore / 2;
+        assertGt(tokenToSell, 0);
+
+        uint256 depositedBefore = contest.secondaryDepositedPerEntry(user2, ENTRY_1);
+        uint256 expectedPrincipalToForfeit = (depositedBefore * tokenToSell) / userBalBefore;
+
+        vm.prank(user2);
+        contest.removeSecondaryPosition(ENTRY_1, tokenToSell);
+
+        assertEq(contest.secondaryDepositedPerEntry(user2, ENTRY_1), depositedBefore - expectedPrincipalToForfeit);
+        // Entry owner position is independent; selling buyer tokens shouldn't change owner attribution.
+        assertEq(contest.secondaryDepositedPerEntry(user1, ENTRY_1), investmentAmount);
+    }
     
     function test_removeSecondaryPosition_SuccessInCancelledState() public {
         _createPrimaryEntry(user1, ENTRY_1);
@@ -944,6 +972,42 @@ contract ContestControllerTest is Test {
         
         assertEq(contest.balanceOf(user3, ENTRY_1), 0);
         assertGt(paymentToken.balanceOf(user3), balanceBefore);
+    }
+
+    function test_secondaryDepositedPerEntry_claimResetsToZero() public {
+        _createPrimaryEntry(user1, ENTRY_1);
+        _createPrimaryEntry(user2, ENTRY_2);
+
+        uint256 amount = PURCHASE_INCREMENT * 10;
+        uint256 investmentAmount = (amount * PRIMARY_ENTRY_INVESTMENT_SHARE_BPS) / 10000;
+        uint256 remainingAmount = amount - investmentAmount;
+
+        _createSecondaryPosition(user3, ENTRY_1, amount);
+
+        assertEq(contest.secondaryDepositedPerEntry(user3, ENTRY_1), remainingAmount);
+        assertEq(contest.secondaryDepositedPerEntry(user1, ENTRY_1), investmentAmount);
+        assertGt(contest.balanceOf(user1, ENTRY_1), 0); // owner-leg tokens exist
+
+        vm.prank(oracle);
+        contest.activateContest();
+        vm.prank(oracle);
+        contest.lockContest();
+
+        uint256[] memory winners = new uint256[](1);
+        winners[0] = ENTRY_1;
+        uint256[] memory payouts = new uint256[](1);
+        payouts[0] = 10000;
+
+        vm.prank(oracle);
+        contest.settleContest(winners, payouts);
+
+        vm.prank(user3);
+        contest.claimSecondaryPayout(ENTRY_1);
+
+        assertEq(contest.balanceOf(user3, ENTRY_1), 0);
+        assertEq(contest.secondaryDepositedPerEntry(user3, ENTRY_1), 0);
+        // Owner position remains; only the claimant's tokens were burned.
+        assertEq(contest.secondaryDepositedPerEntry(user1, ENTRY_1), investmentAmount);
     }
     
     function test_claimSecondaryPayout_WrongState() public {

@@ -53,6 +53,10 @@ contract ContestController is ERC1155, ReentrancyGuard {
     /// @notice Payment token backing this entry's secondary ERC1155 (buy adds; sell/settle removes pro-rata)
     mapping(uint256 => uint256) public secondaryLiquidityPerEntry;
 
+    /// @notice Attributed invested principal per token holder per entry (used by frontend UI)
+    /// @dev Updated on secondary buys and reduced pro-rata on sells; not used for pricing.
+    mapping(address => mapping(uint256 => uint256)) public secondaryDepositedPerEntry;
+
     uint256 public secondaryWinningEntry;
     bool public secondaryMarketResolved;
     bytes32 public secondaryMerkleRoot;
@@ -193,8 +197,12 @@ contract ContestController is ERC1155, ReentrancyGuard {
 
         address owner = entryOwner[entryId];
         if (ownerTokens > 0) {
+            // Attribute owner-leg collateral to the entry owner
+            secondaryDepositedPerEntry[owner][entryId] += investmentAmount;
             _mint(owner, entryId, ownerTokens, "");
         }
+        // Attribute buyer-leg collateral to the secondary buyer
+        secondaryDepositedPerEntry[msg.sender][entryId] += remainingAmount;
         _mint(msg.sender, entryId, buyerTokens, "");
 
         SafeTransferLib.safeTransferFrom(ERC20(paymentToken), msg.sender, address(this), amount);
@@ -217,6 +225,14 @@ contract ContestController is ERC1155, ReentrancyGuard {
         uint256 available = IERC20Balance(paymentToken).balanceOf(address(this));
         if (cashOut > available) {
             cashOut = available;
+        }
+
+        // Reduce attributed invested principal pro-rata to tokens being sold.
+        // This is UI accounting only; sale proceeds are still derived from on-chain liquidity.
+        uint256 depositedOnEntry = secondaryDepositedPerEntry[msg.sender][entryId];
+        if (depositedOnEntry > 0) {
+            uint256 principalToForfeit = (depositedOnEntry * tokenAmount) / userBal;
+            secondaryDepositedPerEntry[msg.sender][entryId] = depositedOnEntry - principalToForfeit;
         }
 
         _burn(msg.sender, entryId, tokenAmount);
@@ -258,6 +274,9 @@ contract ContestController is ERC1155, ReentrancyGuard {
 
         _burn(msg.sender, entryId, balance);
         netPosition[entryId] -= int256(balance);
+
+        // Buyer sold/cashed out all their remaining tokens for this entry.
+        secondaryDepositedPerEntry[msg.sender][entryId] = 0;
 
         if (payout > 0) {
             if (secondaryLiquidityPerEntry[entryId] >= payout) {
@@ -457,6 +476,9 @@ contract ContestController is ERC1155, ReentrancyGuard {
 
                 _burn(participant, entryId, bal);
                 netPosition[entryId] -= int256(bal);
+
+                // Participants cashed out all their remaining tokens for this entry.
+                secondaryDepositedPerEntry[participant][entryId] = 0;
 
                 if (payout > 0) {
                     if (secondaryLiquidityPerEntry[entryId] >= payout) {
