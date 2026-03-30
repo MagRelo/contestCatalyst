@@ -11,8 +11,6 @@ import "solady/utils/MerkleProofLib.sol";
  */
 contract TestStorage {
     mapping(uint256 => address) public entryOwner;
-    mapping(uint256 => uint256) public primaryToSecondarySubsidy;
-    mapping(uint256 => uint256) public primaryPositionSubsidy;
     mapping(uint256 => uint256) public primaryPrizePoolPayouts;
     uint256[] public entries;
     uint256 public expiryTimestamp;
@@ -21,14 +19,6 @@ contract TestStorage {
     // Setter functions for test setup
     function setEntryOwner(uint256 entryId, address owner) external {
         entryOwner[entryId] = owner;
-    }
-
-    function setPrimaryToSecondarySubsidy(uint256 entryId, uint256 subsidy) external {
-        primaryToSecondarySubsidy[entryId] = subsidy;
-    }
-
-    function setPrimaryPositionSubsidy(uint256 entryId, uint256 subsidy) external {
-        primaryPositionSubsidy[entryId] = subsidy;
     }
 
     function setPrimaryPrizePoolPayouts(uint256 entryId, uint256 payout) external {
@@ -83,56 +73,19 @@ contract TestStorage {
         PrimaryContest.validateClaimPrimaryPayout(entryOwner, entryId, owner, state, payout);
     }
 
-    function validateClaimPositionBonus(uint256 entryId, address owner, uint8 state, uint256 bonus)
+    function processAddPrimaryPosition(uint256 entryId, address owner, uint256 primaryDepositAmount) external {
+        PrimaryContest.processAddPrimaryPosition(entries, entryOwner, entryId, owner, primaryDepositAmount);
+    }
+
+    function processRemovePrimaryPosition(uint256 entryId, uint256 primaryDepositAmount)
         external
-        view
+        returns (uint256 refundAmount, uint256 primaryContribution)
     {
-        PrimaryContest.validateClaimPositionBonus(entryOwner, entryId, owner, state, bonus);
-    }
-
-    function processAddPrimaryPosition(
-        uint256 entryId,
-        address owner,
-        uint256 primaryDepositAmount,
-        uint256 /* oracleFee */,
-        uint256 crossSubsidy
-    ) external returns (uint256 primaryContribution) {
-        return PrimaryContest.processAddPrimaryPosition(
-            entries,
-            entryOwner,
-            primaryToSecondarySubsidy,
-            entryId,
-            owner,
-            primaryDepositAmount,
-            crossSubsidy
-        );
-    }
-
-    function processRemovePrimaryPosition(
-        uint256 entryId,
-        uint256 primaryDepositAmount,
-        uint256 /* oracleFee */
-    ) external returns (
-        uint256 refundAmount,
-        uint256 primaryContribution,
-        uint256 crossSubsidy,
-        uint256 bonus
-    ) {
-        return PrimaryContest.processRemovePrimaryPosition(
-            entryOwner,
-            primaryToSecondarySubsidy,
-            primaryPositionSubsidy,
-            entryId,
-            primaryDepositAmount
-        );
+        return PrimaryContest.processRemovePrimaryPosition(entryOwner, entryId, primaryDepositAmount);
     }
 
     function processClaimPrimaryPayout(uint256 entryId, address /* owner */) external returns (uint256 payout) {
         return PrimaryContest.processClaimPrimaryPayout(primaryPrizePoolPayouts, entryId);
-    }
-
-    function processClaimPositionBonus(uint256 entryId, address /* owner */) external returns (uint256 bonus) {
-        return PrimaryContest.processClaimPositionBonus(primaryPositionSubsidy, entryId);
     }
 }
 
@@ -146,11 +99,9 @@ contract TestStorage {
  * - validateAddPrimaryPosition
  * - validateRemovePrimaryPosition
  * - validateClaimPrimaryPayout
- * - validateClaimPositionBonus
  * - processAddPrimaryPosition
  * - processRemovePrimaryPosition
  * - processClaimPrimaryPayout
- * - processClaimPositionBonus
  */
 contract PrimaryContestTest is Test {
     // Contest state enum (matches ContestController)
@@ -180,9 +131,6 @@ contract PrimaryContestTest is Test {
 
     // Test amounts
     uint256 public constant PRIMARY_DEPOSIT = 25e18; // $25
-    uint256 public constant ORACLE_FEE = 1e18; // $1 (4%)
-    uint256 public constant CROSS_SUBSIDY = 2e18; // $2
-    uint256 public constant BONUS = 5e18; // $5
     uint256 public constant PAYOUT = 100e18; // $100
 
     function setUp() public {
@@ -629,18 +577,9 @@ contract PrimaryContestTest is Test {
         testStorage.validateClaimPrimaryPayout(ENTRY_1, owner1, uint8(ContestState.SETTLED), 0);
     }
 
-    function test_validateClaimPositionBonus_Success() public {
+    function test_validateClaimPrimaryPayout_NonZeroPayout() public {
         testStorage.setCurrentState(uint8(ContestState.SETTLED));
         testStorage.setEntryOwner(ENTRY_1, owner1);
-        testStorage.setPrimaryPositionSubsidy(ENTRY_1, BONUS);
-        testStorage.validateClaimPositionBonus(ENTRY_1, owner1, uint8(ContestState.SETTLED), BONUS);
-    }
-
-    function test_validateClaimPrimaryPayout_NonZeroPayoutButZeroBonus() public {
-        testStorage.setCurrentState(uint8(ContestState.SETTLED));
-        testStorage.setEntryOwner(ENTRY_1, owner1);
-        
-        // Should pass with non-zero payout but zero bonus
         testStorage.validateClaimPrimaryPayout(ENTRY_1, owner1, uint8(ContestState.SETTLED), PAYOUT);
     }
 
@@ -649,97 +588,32 @@ contract PrimaryContestTest is Test {
     function test_processAddPrimaryPosition_NewEntry() public {
         uint256 initialLength = testStorage.getEntriesLength();
         
-        uint256 primaryContribution = testStorage.processAddPrimaryPosition(
-            ENTRY_1,
-            owner1,
-            PRIMARY_DEPOSIT,
-            ORACLE_FEE,
-            CROSS_SUBSIDY
-        );
+        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT);
         
-        // Verify entry added to array
         assertEq(testStorage.getEntriesLength(), initialLength + 1);
         assertEq(testStorage.getEntryAtIndex(initialLength), ENTRY_1);
-        
-        // Verify owner set
         assertEq(testStorage.entryOwner(ENTRY_1), owner1);
-        
-        // Verify primaryContribution calculation
-        uint256 expectedContribution = PRIMARY_DEPOSIT - CROSS_SUBSIDY;
-        assertEq(primaryContribution, expectedContribution);
-        
-        // Verify cross-subsidy tracking
-        assertEq(testStorage.primaryToSecondarySubsidy(ENTRY_1), CROSS_SUBSIDY);
     }
 
-    function test_processAddPrimaryPosition_CrossSubsidyTracking() public {
-        testStorage.processAddPrimaryPosition(
-            ENTRY_1,
-            owner1,
-            PRIMARY_DEPOSIT,
-            ORACLE_FEE,
-            CROSS_SUBSIDY
-        );
-        
-        // Verify cross-subsidy is tracked
-        assertEq(testStorage.primaryToSecondarySubsidy(ENTRY_1), CROSS_SUBSIDY);
-    }
-
-    function test_processAddPrimaryPosition_NoCrossSubsidyTracking() public {
-        testStorage.processAddPrimaryPosition(
-            ENTRY_1,
-            owner1,
-            PRIMARY_DEPOSIT,
-            ORACLE_FEE,
-            0
-        );
-        
-        // Verify cross-subsidy is not tracked when zero
-        assertEq(testStorage.primaryToSecondarySubsidy(ENTRY_1), 0);
-    }
-
-    function test_processAddPrimaryPosition_PrimaryContributionCalculation() public {
-        uint256 primaryContribution = testStorage.processAddPrimaryPosition(
-            ENTRY_1,
-            owner1,
-            PRIMARY_DEPOSIT,
-            ORACLE_FEE,
-            CROSS_SUBSIDY
-        );
-        
-        uint256 expectedContribution = PRIMARY_DEPOSIT - CROSS_SUBSIDY;
-        assertEq(primaryContribution, expectedContribution);
+    function test_processRemovePrimaryPosition_FullPrimaryContribution() public {
+        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT);
+        (uint256 refundAmount, uint256 primaryContribution) =
+            testStorage.processRemovePrimaryPosition(ENTRY_1, PRIMARY_DEPOSIT);
+        assertEq(refundAmount, PRIMARY_DEPOSIT);
+        assertEq(primaryContribution, PRIMARY_DEPOSIT);
     }
 
     function test_processAddPrimaryPosition_EventEmission() public {
         vm.expectEmit(true, true, false, false);
         emit PrimaryContest.PrimaryPositionAdded(owner1, ENTRY_1);
         
-        testStorage.processAddPrimaryPosition(
-            ENTRY_1,
-            owner1,
-            PRIMARY_DEPOSIT,
-            ORACLE_FEE,
-            CROSS_SUBSIDY
-        );
+        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT);
     }
 
     function test_processAddPrimaryPosition_MultipleEntries() public {
-        testStorage.processAddPrimaryPosition(
-            ENTRY_1,
-            owner1,
-            PRIMARY_DEPOSIT,
-            ORACLE_FEE,
-            CROSS_SUBSIDY
-        );
+        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT);
         
-        testStorage.processAddPrimaryPosition(
-            ENTRY_2,
-            owner2,
-            PRIMARY_DEPOSIT,
-            ORACLE_FEE,
-            CROSS_SUBSIDY
-        );
+        testStorage.processAddPrimaryPosition(ENTRY_2, owner2, PRIMARY_DEPOSIT);
         
         // Verify array grows correctly
         assertEq(testStorage.getEntriesLength(), 2);
@@ -751,127 +625,33 @@ contract PrimaryContestTest is Test {
 
     function test_processRemovePrimaryPosition_RemovesEntry() public {
         // First add entry
-        testStorage.processAddPrimaryPosition(
-            ENTRY_1,
-            owner1,
-            PRIMARY_DEPOSIT,
-            ORACLE_FEE,
-            CROSS_SUBSIDY
-        );
+        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT);
         
         // Then remove it
-        (uint256 refundAmount, uint256 primaryContribution, uint256 crossSubsidy, ) = 
-            testStorage.processRemovePrimaryPosition(ENTRY_1, PRIMARY_DEPOSIT, ORACLE_FEE);
+        (uint256 refundAmount, uint256 primaryContribution) = testStorage.processRemovePrimaryPosition(ENTRY_1, PRIMARY_DEPOSIT);
         
         // Verify owner cleared
         assertEq(testStorage.entryOwner(ENTRY_1), address(0));
         
-        // Verify refund amount
         assertEq(refundAmount, PRIMARY_DEPOSIT);
-        
-        // Verify primaryContribution calculation
-        uint256 expectedContribution = PRIMARY_DEPOSIT - CROSS_SUBSIDY;
-        assertEq(primaryContribution, expectedContribution);
-        
-        // Verify cross-subsidy returned
-        assertEq(crossSubsidy, CROSS_SUBSIDY);
-        
-        // Verify cross-subsidy mapping cleared
-        assertEq(testStorage.primaryToSecondarySubsidy(ENTRY_1), 0);
+        assertEq(primaryContribution, PRIMARY_DEPOSIT);
     }
 
     function test_processRemovePrimaryPosition_RefundAmount() public {
-        testStorage.processAddPrimaryPosition(
-            ENTRY_1,
-            owner1,
-            PRIMARY_DEPOSIT,
-            ORACLE_FEE,
-            CROSS_SUBSIDY
-        );
+        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT);
         
-        (uint256 refundAmount, , , ) = testStorage.processRemovePrimaryPosition(
-            ENTRY_1,
-            PRIMARY_DEPOSIT,
-            ORACLE_FEE
-        );
+        (uint256 refundAmount, ) = testStorage.processRemovePrimaryPosition(ENTRY_1, PRIMARY_DEPOSIT);
         
         assertEq(refundAmount, PRIMARY_DEPOSIT);
     }
 
-    function test_processRemovePrimaryPosition_CrossSubsidyReversal() public {
-        testStorage.processAddPrimaryPosition(
-            ENTRY_1,
-            owner1,
-            PRIMARY_DEPOSIT,
-            ORACLE_FEE,
-            CROSS_SUBSIDY
-        );
-        
-        ( , , uint256 crossSubsidy, ) = testStorage.processRemovePrimaryPosition(
-            ENTRY_1,
-            PRIMARY_DEPOSIT,
-            ORACLE_FEE
-        );
-        
-        assertEq(crossSubsidy, CROSS_SUBSIDY);
-        assertEq(testStorage.primaryToSecondarySubsidy(ENTRY_1), 0);
-    }
-
-    function test_processRemovePrimaryPosition_BonusForfeiture() public {
-        testStorage.processAddPrimaryPosition(
-            ENTRY_1,
-            owner1,
-            PRIMARY_DEPOSIT,
-            ORACLE_FEE,
-            CROSS_SUBSIDY
-        );
-        
-        // Set bonus
-        testStorage.setPrimaryPositionSubsidy(ENTRY_1, BONUS);
-        
-        ( , , , uint256 bonus) = testStorage.processRemovePrimaryPosition(
-            ENTRY_1,
-            PRIMARY_DEPOSIT,
-            ORACLE_FEE
-        );
-        
-        assertEq(bonus, BONUS);
-        assertEq(testStorage.primaryPositionSubsidy(ENTRY_1), 0);
-    }
-
-    function test_processRemovePrimaryPosition_NoBonusForfeiture() public {
-        testStorage.processAddPrimaryPosition(
-            ENTRY_1,
-            owner1,
-            PRIMARY_DEPOSIT,
-            ORACLE_FEE,
-            CROSS_SUBSIDY
-        );
-        
-        // No bonus set
-        
-        ( , , , uint256 bonus) = testStorage.processRemovePrimaryPosition(
-            ENTRY_1,
-            PRIMARY_DEPOSIT,
-            ORACLE_FEE
-        );
-        
-        assertEq(bonus, 0);
-    }
-
     function test_processRemovePrimaryPosition_EventEmission() public {
-        testStorage.processAddPrimaryPosition(
-            ENTRY_1,
-            owner1,
-            PRIMARY_DEPOSIT,
-            ORACLE_FEE,
-            CROSS_SUBSIDY
-        );
+        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT);
         
         vm.expectEmit(true, true, false, false);
         emit PrimaryContest.PrimaryPositionRemoved(ENTRY_1, owner1);
         
-        testStorage.processRemovePrimaryPosition(ENTRY_1, PRIMARY_DEPOSIT, ORACLE_FEE);
+        testStorage.processRemovePrimaryPosition(ENTRY_1, PRIMARY_DEPOSIT);
     }
 
     // ============ processClaimPrimaryPayout Tests ============
@@ -885,30 +665,8 @@ contract PrimaryContestTest is Test {
         assertEq(testStorage.primaryPrizePoolPayouts(ENTRY_1), 0);
     }
 
-    function test_processClaimPositionBonus_BonusOnly() public {
-        testStorage.setPrimaryPositionSubsidy(ENTRY_1, BONUS);
-
-        uint256 bonus = testStorage.processClaimPositionBonus(ENTRY_1, owner1);
-
-        assertEq(bonus, BONUS);
-        assertEq(testStorage.primaryPositionSubsidy(ENTRY_1), 0);
-    }
-
-    function test_processClaimPrimaryPayout_LeavesBonusUntouched() public {
-        testStorage.setPrimaryPrizePoolPayouts(ENTRY_1, PAYOUT);
-        testStorage.setPrimaryPositionSubsidy(ENTRY_1, BONUS);
-
-        uint256 payout = testStorage.processClaimPrimaryPayout(ENTRY_1, owner1);
-
-        assertEq(payout, PAYOUT);
-        assertEq(testStorage.primaryPrizePoolPayouts(ENTRY_1), 0);
-        assertEq(testStorage.primaryPositionSubsidy(ENTRY_1), BONUS);
-    }
-
     function test_processClaimPrimaryPayout_EventEmission() public {
         testStorage.setPrimaryPrizePoolPayouts(ENTRY_1, PAYOUT);
-        testStorage.setPrimaryPositionSubsidy(ENTRY_1, BONUS);
-
         testStorage.processClaimPrimaryPayout(ENTRY_1, owner1);
     }
 
@@ -992,72 +750,24 @@ contract PrimaryContestTest is Test {
         }
     }
 
-    function testFuzz_processAddPrimaryPosition_Amounts(
-        uint256 entryId,
-        address owner,
-        uint256 depositAmount,
-        uint256 oracleFee,
-        uint256 crossSubsidy
-    ) public {
-        // Bound inputs to prevent underflow
+    function testFuzz_processAddPrimaryPosition_Amounts(uint256 entryId, address owner, uint256 depositAmount) public {
         depositAmount = bound(depositAmount, 1, type(uint256).max / 2);
-        oracleFee = bound(oracleFee, 0, depositAmount - 1);
-        crossSubsidy = bound(crossSubsidy, 0, depositAmount - oracleFee - 1);
         
-        uint256 primaryContribution = testStorage.processAddPrimaryPosition(
-            entryId,
-            owner,
-            depositAmount,
-            oracleFee,
-            crossSubsidy
-        );
-        
-        // Verify invariant: primaryContribution + crossSubsidy == depositAmount
-        assertEq(primaryContribution + crossSubsidy, depositAmount);
-        
-        // Verify owner set
+        testStorage.processAddPrimaryPosition(entryId, owner, depositAmount);
         assertEq(testStorage.entryOwner(entryId), owner);
-        
-        // Verify cross-subsidy tracking
-        if (crossSubsidy > 0) {
-            assertEq(testStorage.primaryToSecondarySubsidy(entryId), crossSubsidy);
-        }
     }
 
-    function testFuzz_processRemovePrimaryPosition_Amounts(
-        uint256 entryId,
-        address owner,
-        uint256 depositAmount,
-        uint256 oracleFee,
-        uint256 crossSubsidy,
-        uint256 bonus
-    ) public {
-        // Bound inputs to prevent underflow
+    function testFuzz_processRemovePrimaryPosition_Amounts(uint256 entryId, address owner, uint256 depositAmount) public {
         depositAmount = bound(depositAmount, 1, type(uint256).max / 2);
-        oracleFee = bound(oracleFee, 0, depositAmount - 1);
-        crossSubsidy = bound(crossSubsidy, 0, depositAmount - oracleFee - 1);
-        bonus = bound(bonus, 0, type(uint256).max / 2);
         
-        // First add entry
-        testStorage.processAddPrimaryPosition(entryId, owner, depositAmount, oracleFee, crossSubsidy);
-        if (bonus > 0) {
-            testStorage.setPrimaryPositionSubsidy(entryId, bonus);
-        }
+        testStorage.processAddPrimaryPosition(entryId, owner, depositAmount);
         
-        (uint256 refundAmount, uint256 primaryContribution, uint256 returnedCrossSubsidy, uint256 returnedBonus) = 
-            testStorage.processRemovePrimaryPosition(entryId, depositAmount, oracleFee);
+        (uint256 refundAmount, uint256 primaryContribution) =
+            testStorage.processRemovePrimaryPosition(entryId, depositAmount);
         
-        // Verify invariant: refundAmount == depositAmount
         assertEq(refundAmount, depositAmount);
-        
-        // Verify invariant: primaryContribution + crossSubsidy == depositAmount
-        assertEq(primaryContribution + returnedCrossSubsidy, depositAmount);
-        
-        // Verify owner cleared
+        assertEq(primaryContribution, depositAmount);
         assertEq(testStorage.entryOwner(entryId), address(0));
-        
-        // Verify bonus returned
-        assertEq(returnedBonus, bonus);
     }
 
     function testFuzz_processClaimPrimaryPayout_Amounts(uint256 entryId, address owner, uint256 payout) public {
@@ -1069,17 +779,6 @@ contract PrimaryContestTest is Test {
 
         assertEq(returnedPayout, payout);
         assertEq(testStorage.primaryPrizePoolPayouts(entryId), 0);
-    }
-
-    function testFuzz_processClaimPositionBonus_Amounts(uint256 entryId, address owner, uint256 bonus) public {
-        bonus = bound(bonus, 1, type(uint256).max / 2);
-
-        testStorage.setPrimaryPositionSubsidy(entryId, bonus);
-
-        uint256 returnedBonus = testStorage.processClaimPositionBonus(entryId, owner);
-
-        assertEq(returnedBonus, bonus);
-        assertEq(testStorage.primaryPositionSubsidy(entryId), 0);
     }
 
     function testFuzz_validatePrimaryMerkleProof_RandomProofs(
@@ -1107,45 +806,26 @@ contract PrimaryContestTest is Test {
 
     function test_invariant_EntryOwnerConsistency() public {
         // Add entry
-        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT, ORACLE_FEE, CROSS_SUBSIDY);
+        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT);
         assertEq(testStorage.entryOwner(ENTRY_1), owner1);
         
         // Remove entry - owner should be cleared
-        testStorage.processRemovePrimaryPosition(ENTRY_1, PRIMARY_DEPOSIT, ORACLE_FEE);
+        testStorage.processRemovePrimaryPosition(ENTRY_1, PRIMARY_DEPOSIT);
         assertEq(testStorage.entryOwner(ENTRY_1), address(0));
     }
 
     function test_invariant_EntryArrayGrowth() public {
         uint256 initialLength = testStorage.getEntriesLength();
         
-        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT, ORACLE_FEE, CROSS_SUBSIDY);
+        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT);
         assertEq(testStorage.getEntriesLength(), initialLength + 1);
         
-        testStorage.processAddPrimaryPosition(ENTRY_2, owner2, PRIMARY_DEPOSIT, ORACLE_FEE, CROSS_SUBSIDY);
+        testStorage.processAddPrimaryPosition(ENTRY_2, owner2, PRIMARY_DEPOSIT);
         assertEq(testStorage.getEntriesLength(), initialLength + 2);
         
         // Array should never shrink (removal doesn't remove from array)
-        testStorage.processRemovePrimaryPosition(ENTRY_1, PRIMARY_DEPOSIT, ORACLE_FEE);
+        testStorage.processRemovePrimaryPosition(ENTRY_1, PRIMARY_DEPOSIT);
         assertEq(testStorage.getEntriesLength(), initialLength + 2);
-    }
-
-    function test_invariant_CrossSubsidyTracking() public {
-        // Add with cross-subsidy
-        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT, ORACLE_FEE, CROSS_SUBSIDY);
-        assertEq(testStorage.primaryToSecondarySubsidy(ENTRY_1), CROSS_SUBSIDY);
-        
-        // Add without cross-subsidy
-        testStorage.processAddPrimaryPosition(ENTRY_2, owner2, PRIMARY_DEPOSIT, ORACLE_FEE, 0);
-        assertEq(testStorage.primaryToSecondarySubsidy(ENTRY_2), 0);
-    }
-
-    function test_invariant_BonusTracking() public {
-        testStorage.setPrimaryPositionSubsidy(ENTRY_1, BONUS);
-        assertEq(testStorage.primaryPositionSubsidy(ENTRY_1), BONUS);
-
-        testStorage.setEntryOwner(ENTRY_1, owner1);
-        testStorage.processClaimPositionBonus(ENTRY_1, owner1);
-        assertEq(testStorage.primaryPositionSubsidy(ENTRY_1), 0);
     }
 
     function test_invariant_PayoutClearing() public {
@@ -1161,44 +841,16 @@ contract PrimaryContestTest is Test {
         testStorage.validateClaimPrimaryPayout(ENTRY_1, owner1, uint8(ContestState.SETTLED), 0);
     }
 
-    function test_invariant_AddPositionContribution() public {
-        uint256 primaryContribution = testStorage.processAddPrimaryPosition(
-            ENTRY_1,
-            owner1,
-            PRIMARY_DEPOSIT,
-            ORACLE_FEE,
-            CROSS_SUBSIDY
-        );
-        
-        assertEq(primaryContribution + CROSS_SUBSIDY, PRIMARY_DEPOSIT);
-    }
-
     function test_invariant_RemovePositionRefund() public {
-        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT, ORACLE_FEE, CROSS_SUBSIDY);
+        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT);
         
-        (uint256 refundAmount, , , ) = testStorage.processRemovePrimaryPosition(
-            ENTRY_1,
-            PRIMARY_DEPOSIT,
-            ORACLE_FEE
-        );
+        (uint256 refundAmount, ) = testStorage.processRemovePrimaryPosition(ENTRY_1, PRIMARY_DEPOSIT);
         
         assertEq(refundAmount, PRIMARY_DEPOSIT);
     }
 
-    function test_invariant_ClaimTotal() public {
-        testStorage.setEntryOwner(ENTRY_1, owner1);
-        testStorage.setPrimaryPrizePoolPayouts(ENTRY_1, PAYOUT);
-        testStorage.setPrimaryPositionSubsidy(ENTRY_1, BONUS);
-
-        uint256 payout = testStorage.processClaimPrimaryPayout(ENTRY_1, owner1);
-        uint256 bonus = testStorage.processClaimPositionBonus(ENTRY_1, owner1);
-
-        assertEq(payout, PAYOUT);
-        assertEq(bonus, BONUS);
-    }
-
     function test_invariant_NoDoubleAdd() public {
-        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT, ORACLE_FEE, CROSS_SUBSIDY);
+        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT);
         
         // Try to add again - should fail validation
         testStorage.setExpiryTimestamp(block.timestamp + 1000);
@@ -1216,7 +868,7 @@ contract PrimaryContestTest is Test {
     }
 
     function test_invariant_NoRemoveAfterActive() public {
-        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT, ORACLE_FEE, CROSS_SUBSIDY);
+        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT);
         
         // Try to remove in ACTIVE state
         vm.expectRevert("Cannot withdraw - contest in progress or settled");
@@ -1246,21 +898,8 @@ contract PrimaryContestTest is Test {
         testStorage.setExpiryTimestamp(block.timestamp + 1000);
         
         // Should work with address(0) as owner (though unusual)
-        testStorage.processAddPrimaryPosition(ENTRY_1, address(0), PRIMARY_DEPOSIT, ORACLE_FEE, 0);
+        testStorage.processAddPrimaryPosition(ENTRY_1, address(0), PRIMARY_DEPOSIT);
         assertEq(testStorage.entryOwner(ENTRY_1), address(0));
-    }
-
-    function test_EdgeCase_ZeroCrossSubsidy() public {
-        uint256 primaryContribution = testStorage.processAddPrimaryPosition(
-            ENTRY_1,
-            owner1,
-            PRIMARY_DEPOSIT,
-            ORACLE_FEE,
-            0
-        );
-        
-        assertEq(primaryContribution, PRIMARY_DEPOSIT);
-        assertEq(testStorage.primaryToSecondarySubsidy(ENTRY_1), 0);
     }
 
     function test_EdgeCase_ZeroBonus() public {
@@ -1270,15 +909,6 @@ contract PrimaryContestTest is Test {
         uint256 payout = testStorage.processClaimPrimaryPayout(ENTRY_1, owner1);
 
         assertEq(payout, PAYOUT);
-    }
-
-    function test_EdgeCase_ZeroPayout() public {
-        testStorage.setEntryOwner(ENTRY_1, owner1);
-        testStorage.setPrimaryPositionSubsidy(ENTRY_1, BONUS);
-
-        uint256 bonus = testStorage.processClaimPositionBonus(ENTRY_1, owner1);
-
-        assertEq(bonus, BONUS);
     }
 
     function test_EdgeCase_EmptyMerkleProofArray() public view {
@@ -1309,35 +939,23 @@ contract PrimaryContestTest is Test {
 
     function test_EdgeCase_VeryLargeAmounts() public {
         uint256 largeDeposit = type(uint256).max / 2;
-        uint256 largeOracleFee = largeDeposit / 10;
-        uint256 largeCrossSubsidy = largeDeposit / 2;
-        
-        // Should handle large amounts without overflow
-        uint256 primaryContribution = testStorage.processAddPrimaryPosition(
-            ENTRY_1,
-            owner1,
-            largeDeposit,
-            largeOracleFee,
-            largeCrossSubsidy
-        );
-        
-        assertEq(primaryContribution + largeCrossSubsidy, largeDeposit);
+        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, largeDeposit);
+        (uint256 refundAmount, uint256 primaryContribution) =
+            testStorage.processRemovePrimaryPosition(ENTRY_1, largeDeposit);
+        assertEq(refundAmount, largeDeposit);
+        assertEq(primaryContribution, largeDeposit);
     }
 
     // ============ Integration/Sequence Tests ============
 
     function test_CompleteFlow_AddRemove() public {
         // Add entry
-        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT, ORACLE_FEE, CROSS_SUBSIDY);
+        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT);
         assertEq(testStorage.entryOwner(ENTRY_1), owner1);
         
         // Remove entry in OPEN state
         testStorage.setCurrentState(uint8(ContestState.OPEN));
-        (uint256 refundAmount, , , ) = testStorage.processRemovePrimaryPosition(
-            ENTRY_1,
-            PRIMARY_DEPOSIT,
-            ORACLE_FEE
-        );
+        (uint256 refundAmount, ) = testStorage.processRemovePrimaryPosition(ENTRY_1, PRIMARY_DEPOSIT);
         
         assertEq(refundAmount, PRIMARY_DEPOSIT);
         assertEq(testStorage.entryOwner(ENTRY_1), address(0));
@@ -1345,7 +963,7 @@ contract PrimaryContestTest is Test {
 
     function test_CompleteFlow_AddClaim() public {
         // Add entry
-        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT, ORACLE_FEE, CROSS_SUBSIDY);
+        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT);
         
         // Settle contest
         testStorage.setCurrentState(uint8(ContestState.SETTLED));
@@ -1356,31 +974,16 @@ contract PrimaryContestTest is Test {
         assertEq(testStorage.primaryPrizePoolPayouts(ENTRY_1), 0);
     }
 
-    function test_CompleteFlow_AddWithBonus() public {
-        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT, ORACLE_FEE, CROSS_SUBSIDY);
-
-        testStorage.setPrimaryPositionSubsidy(ENTRY_1, BONUS);
-
-        testStorage.setCurrentState(uint8(ContestState.SETTLED));
-        testStorage.setPrimaryPrizePoolPayouts(ENTRY_1, PAYOUT);
-
-        uint256 payout = testStorage.processClaimPrimaryPayout(ENTRY_1, owner1);
-        uint256 bonus = testStorage.processClaimPositionBonus(ENTRY_1, owner1);
-
-        assertEq(payout, PAYOUT);
-        assertEq(bonus, BONUS);
-    }
-
     function test_CompleteFlow_MultipleEntries() public {
         // Multiple users add entries
-        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT, ORACLE_FEE, CROSS_SUBSIDY);
-        testStorage.processAddPrimaryPosition(ENTRY_2, owner2, PRIMARY_DEPOSIT, ORACLE_FEE, CROSS_SUBSIDY);
+        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT);
+        testStorage.processAddPrimaryPosition(ENTRY_2, owner2, PRIMARY_DEPOSIT);
         
         assertEq(testStorage.getEntriesLength(), 2);
         
         // One user removes
         testStorage.setCurrentState(uint8(ContestState.OPEN));
-        testStorage.processRemovePrimaryPosition(ENTRY_1, PRIMARY_DEPOSIT, ORACLE_FEE);
+        testStorage.processRemovePrimaryPosition(ENTRY_1, PRIMARY_DEPOSIT);
         assertEq(testStorage.entryOwner(ENTRY_1), address(0));
         
         // Other user's entry still exists
@@ -1391,7 +994,7 @@ contract PrimaryContestTest is Test {
         // Add entries in OPEN
         testStorage.setCurrentState(uint8(ContestState.OPEN));
         testStorage.setExpiryTimestamp(block.timestamp + 1000);
-        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT, ORACLE_FEE, CROSS_SUBSIDY);
+        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT);
         
         // State changes to ACTIVE - cannot add more
         testStorage.setCurrentState(uint8(ContestState.ACTIVE));
@@ -1402,12 +1005,12 @@ contract PrimaryContestTest is Test {
     function test_StateTransition_RemoveThenActive() public {
         // Add and remove in OPEN
         testStorage.setCurrentState(uint8(ContestState.OPEN));
-        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT, ORACLE_FEE, CROSS_SUBSIDY);
-        testStorage.processRemovePrimaryPosition(ENTRY_1, PRIMARY_DEPOSIT, ORACLE_FEE);
+        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT);
+        testStorage.processRemovePrimaryPosition(ENTRY_1, PRIMARY_DEPOSIT);
         
         // State changes to ACTIVE - cannot remove (already removed, but testing state check)
         testStorage.setCurrentState(uint8(ContestState.ACTIVE));
-        testStorage.processAddPrimaryPosition(ENTRY_2, owner2, PRIMARY_DEPOSIT, ORACLE_FEE, CROSS_SUBSIDY);
+        testStorage.processAddPrimaryPosition(ENTRY_2, owner2, PRIMARY_DEPOSIT);
         
         vm.expectRevert("Cannot withdraw - contest in progress or settled");
         testStorage.validateRemovePrimaryPosition(ENTRY_2, owner2, uint8(ContestState.ACTIVE));
@@ -1415,7 +1018,7 @@ contract PrimaryContestTest is Test {
 
     function test_StateTransition_SettleThenClaim() public {
         // Add entry
-        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT, ORACLE_FEE, CROSS_SUBSIDY);
+        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT);
         
         // Settle contest
         testStorage.setCurrentState(uint8(ContestState.SETTLED));
@@ -1441,7 +1044,7 @@ contract PrimaryContestTest is Test {
     }
 
     function test_UX_NoFundLossOnInvalidRemove() public {
-        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT, ORACLE_FEE, CROSS_SUBSIDY);
+        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT);
         
         // Try to remove in wrong state
         testStorage.setCurrentState(uint8(ContestState.ACTIVE));
@@ -1466,13 +1069,9 @@ contract PrimaryContestTest is Test {
     }
 
     function test_UX_FullRefundOnRemove() public {
-        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT, ORACLE_FEE, CROSS_SUBSIDY);
+        testStorage.processAddPrimaryPosition(ENTRY_1, owner1, PRIMARY_DEPOSIT);
         
-        (uint256 refundAmount, , , ) = testStorage.processRemovePrimaryPosition(
-            ENTRY_1,
-            PRIMARY_DEPOSIT,
-            ORACLE_FEE
-        );
+        (uint256 refundAmount, ) = testStorage.processRemovePrimaryPosition(ENTRY_1, PRIMARY_DEPOSIT);
         
         // User should get full deposit back
         assertEq(refundAmount, PRIMARY_DEPOSIT);
@@ -1481,13 +1080,10 @@ contract PrimaryContestTest is Test {
     function test_UX_CompleteClaim() public {
         testStorage.setEntryOwner(ENTRY_1, owner1);
         testStorage.setPrimaryPrizePoolPayouts(ENTRY_1, PAYOUT);
-        testStorage.setPrimaryPositionSubsidy(ENTRY_1, BONUS);
 
         uint256 payout = testStorage.processClaimPrimaryPayout(ENTRY_1, owner1);
-        uint256 bonus = testStorage.processClaimPositionBonus(ENTRY_1, owner1);
 
         assertEq(payout, PAYOUT);
-        assertEq(bonus, BONUS);
     }
 
     function test_UX_ClearErrorMessages() public {

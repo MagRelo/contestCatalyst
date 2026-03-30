@@ -136,7 +136,7 @@ forge test --match-path test/SecondaryPricingSimulation.t.sol -vvv
 
 ### Simulation Test Results
 
-The following tables show real-world simulation results from test runs with **current settings** (5% oracle fee, 5% position bonus, 30% target primary share, 15% max cross-subsidy). These demonstrate how the polynomial bonding curve behaves in practice.
+The following tables show real-world simulation results from test runs with **current settings** (5% oracle fee, 5% primary entry investment carve to the owner’s curve leg, isolated primary vs secondary liquidity). These demonstrate how the polynomial bonding curve behaves in practice.
 
 #### Scenario 1: Sequential Equal Purchases
 
@@ -267,20 +267,13 @@ Early buyers purchase, then whale makes large purchase.
 
 ## Deposit Flow
 
-When a secondary participant makes a deposit, the funds are allocated as follows:
+When a secondary participant pays `amount` for an entry:
 
-1. **Position Bonus**: 5% of deposit (500 basis points) - goes to entry owner
-2. **Cross-Subsidy**: Up to 15% of remaining amount (1500 basis points) - dynamically allocated to balance primary/secondary pools toward 30% target
-3. **Collateral**: Remaining amount - backs ERC1155 tokens and determines pricing
+1. **Primary entry investment**: `amount * primaryEntryInvestmentShareBps / 10000` is spent on the owner’s curve leg first (mints owner ERC1155).
+2. **Buyer leg**: The remainder is spent on the buyer’s curve leg (mints buyer ERC1155).
+3. **Liquidity**: The full `amount` is credited to that entry’s `secondaryLiquidityPerEntry[entryId]` (sole payment-token backing for open-phase sell-back and settlement on that entry).
 
-**Example for $100 deposit:**
-
-- Position bonus: $5.00 (5% of $100)
-- Remaining after bonus: $95.00
-- Cross-subsidy: ~$14.25 (15% of $95.00, if needed to balance pools)
-- Collateral: ~$80.75 (remaining amount used for token purchase)
-
-The collateral amount is what actually goes into the bonding curve pricing calculation. Oracle fees are deducted later on settled payout flows (`claim*`/`push*`), not at deposit time.
+Oracle fees apply on settled secondary payout claims (`claimSecondaryPayout` / `pushSecondaryPayouts`), not at deposit time.
 
 ## Parameters
 
@@ -294,12 +287,10 @@ The collateral amount is what actually goes into the bonding curve pricing calcu
 
 ### Contest Settings
 
-| Parameter               | Value | Description                                                 |
-| ----------------------- | ----- | ----------------------------------------------------------- |
-| `oracleFeeBps`          | 500   | Oracle fee: 5% (500 basis points)                           |
-| `positionBonusShareBps` | 500   | Position bonus: 5% (500 basis points) - goes to entry owner |
-| `targetPrimaryShareBps` | 3000  | Target primary-side share: 30% (3000 basis points)          |
-| `maxCrossSubsidyBps`    | 1500  | Maximum cross-subsidy: 15% (1500 basis points)              |
+| Parameter                        | Value | Description                                                                 |
+| -------------------------------- | ----- | --------------------------------------------------------------------------- |
+| `oracleFeeBps`                   | 500   | Oracle fee: 5% (500 basis points)                                           |
+| `primaryEntryInvestmentShareBps` | 500   | 5% owner-first curve leg on each secondary buy                              |
 
 ### Tuning Parameters
 
@@ -398,27 +389,12 @@ However, the implementation uses Simpson's rule for numerical integration, which
 
 ## Migration Notes
 
-### Settings Changes
+### Model
 
-The contest settings were updated from:
-
-- **Old**: 1% oracle fee, 50% position bonus, 50% target primary share, 10% max cross-subsidy
-- **New**: 5% oracle fee, 5% position bonus, 30% target primary share, 15% max cross-subsidy
-
-### Impact on Pricing Behavior
-
-1. **More Collateral Per Deposit**: With lower position bonus (5% vs 50%), more funds go to collateral, resulting in more tokens per dollar spent (~9.02e18 vs ~4.95e18 for $10 purchase)
-2. **Slower Initial Price Growth**: More tokens per purchase means price increases more gradually for small purchases
-3. **Same Core Properties**: The pricing algorithm (polynomial bonding curve) is unchanged, so all qualitative behaviors remain:
-   - Early bettor advantage ✓
-   - Whale protection ✓
-   - Price increases with shares ✓
-   - Quadratic growth for large purchases ✓
+- **Primary** deposits accrue only to `primaryPrizePool` (no cross-subsidy out).
+- **Secondary** uses per-entry liquidity plus the same polynomial curve for owner and buyer legs after the investment carve.
+- **Historical note**: Older docs referred to position bonuses and pool cross-subsidies; those mechanisms are removed.
 
 ### Test Results
 
-The test result tables in this document have been updated with current settings (as of latest test run). All values reflect the new settings:
-
-- More tokens per dollar due to higher collateral allocation
-- Same qualitative behaviors (early bettor advantage, whale protection)
-- Price increases remain quadratic, providing strong protection against manipulation
+Re-run `forge test --match-path test/SecondaryPricingSimulation.t.sol -vv` to refresh tables after economics or curve constants change.

@@ -39,21 +39,18 @@ To maintain consistency in assumptions and analysis across all tests and documen
 
 The standard initial contract settings are defined in:
 
-1. **`test/SecondaryPricingBreakeven.t.sol`** - See the `setUp()` function (lines 55-92) and constants at the top of the file:
+1. **`test/SecondaryPricingBreakeven.t.sol`** - See the `setUp()` function and constants at the top of the file:
 
    - `PRIMARY_DEPOSIT = 25e18` ($25)
    - `oracleFeeBps = 500` (5%)
-   - `positionBonusShareBps = 500` (5%)
-   - `targetPrimaryShareBps = 3000` (30%)
-   - `maxCrossSubsidyBps = 1500` (15%)
+   - `primaryEntryInvestmentShareBps = 500` (5%) — owner-first curve leg on each secondary buy
    - `PURCHASE_INCREMENT = 10e18` ($10)
+   - No cross-subsidy parameters; primary prize pool and per-entry secondary liquidity are isolated
 
-2. **`SecondaryPricingBreakeven.md`** - See the "Contest Configuration" section (lines 3-17):
+2. **`SecondaryPricingBreakeven.md`** - See the "Contest Configuration" section:
    - `PRIMARY_DEPOSIT`: $25
    - `oracleFeeBps`: 500 (5%)
-   - `positionBonusShareBps`: 500 (5%)
-   - `targetPrimaryShareBps`: 3000 (30%)
-   - `maxCrossSubsidyBps`: 1500 (15%)
+   - `primaryEntryInvestmentShareBps`: 500 (5%)
    - `COEFFICIENT`: 1
    - `BASE_PRICE`: 1e6
    - `PRICE_PRECISION`: 1e6

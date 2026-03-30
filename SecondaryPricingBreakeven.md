@@ -4,31 +4,29 @@
 
 This analysis uses the following contest settings:
 
-| Parameter               | Value | Description                                                 |
-| ----------------------- | ----- | ----------------------------------------------------------- |
-| `PRIMARY_DEPOSIT`       | $25   | Fixed amount each primary participant must deposit          |
-| `oracleFeeBps`          | 500   | Oracle fee: 5% (500 basis points)                           |
-| `positionBonusShareBps` | 500   | Position bonus: 5% (500 basis points) - goes to entry owner |
-| `targetPrimaryShareBps` | 3000  | Target primary-side share: 30% (3000 basis points)          |
-| `maxCrossSubsidyBps`    | 1500  | Maximum cross-subsidy: 15% (1500 basis points)              |
-| `COEFFICIENT`           | 1     | Quadratic bonding curve coefficient                         |
-| `BASE_PRICE`            | 1e6   | Minimum price: 1.0 (scaled by PRICE_PRECISION)              |
-| `PRICE_PRECISION`       | 1e6   | Price precision: 1.0 = 1,000,000                            |
+| Parameter                          | Value | Description                                                                 |
+| ---------------------------------- | ----- | ----------------------------------------------------------------------------- |
+| `PRIMARY_DEPOSIT`                  | $25   | Fixed amount each primary participant must deposit                            |
+| `oracleFeeBps`                     | 500   | Oracle fee: 5% (500 basis points)                                               |
+| `primaryEntryInvestmentShareBps`   | 500   | 5% of each secondary buy funds the owner’s curve leg before the buyer’s leg   |
+| `COEFFICIENT`                      | 1     | Quadratic bonding curve coefficient                                           |
+| `BASE_PRICE`                       | 1e6   | Minimum price: 1.0 (scaled by PRICE_PRECISION)                                  |
+| `PRICE_PRECISION`                  | 1e6   | Price precision: 1.0 = 1,000,000                                              |
+
+Primary and secondary sides do not cross-subsidize. Secondary payment-token backing is per entry (`secondaryLiquidityPerEntry` in the controller), not a separate global secondary pool.
 
 ## Overview
 
 This document analyzes when additional betting on a single entry becomes economically prohibitive due to the quadratic bonding curve pricing mechanism with `COEFFICIENT = 1`.
 
-**Note:** This analysis is based on the current configuration with 5 primary entries ($125 total deposited into the primary side before claims), 30% target primary share, 5% oracle fee, and 15% maximum cross-subsidy. All results were generated from actual test runs.
+**Note:** This analysis is tied to `test/SecondaryPricingBreakeven.t.sol`. After moving to isolated primary/secondary markets (no cross-subsidy), re-run the test with verbose logging and refresh the numeric break-even claims below if economics shift materially.
 
 ## Test Setup
 
 - **Initial Configuration:**
-  - **5 primary entries created** ($25 per entry = $125 total deposited)
-  - **Primary prize pool:** starts from gross primary deposits and then evolves with cross-subsidies/claims
-  - **Each primary entry bets $20 on themselves** ($20 × 5 = $100 total in secondary prize pool)
-  - **Initial pool distribution:** Primary/Secondary balances are shaped by deposits and cross-subsidies
-  - **Cross-subsidy behavior:** Subsidies flow to balance pools toward 30% primary target
+  - **5 primary entries created** ($25 per entry = $125 total deposited into `primaryPrizePool`)
+  - **Each primary entry buys $20 secondary on their own entry**; each payment stays in that entry’s secondary liquidity and bonding-curve supply
+  - **No cross-subsidy** between primary pool and secondary liquidity
   - **Entry 1 initial state:** 18.05 tokens, 20% ownership (equal bets on all 5 entries)
   - **Two bettors alternate $10 purchases** on Entry 1, competing for ownership
   - Analysis tracks break-even economics for each bettor as they compete

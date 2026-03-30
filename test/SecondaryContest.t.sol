@@ -12,14 +12,9 @@ import "solady/utils/MerkleProofLib.sol";
 contract TestStorage {
     mapping(uint256 => address) public entryOwner;
     mapping(uint256 => int256) public netPosition;
-    mapping(uint256 => uint256) public primaryPositionSubsidy;
-    mapping(address => mapping(uint256 => uint256)) public secondaryToPrimarySubsidy;
-    mapping(address => mapping(uint256 => uint256)) public secondaryDepositedPerEntry;
     uint8 public currentState;
     bool public secondaryMarketResolved;
     uint256 public secondaryWinningEntry;
-    uint256 public secondaryPrizePool;
-    uint256 public secondaryPrizePoolSubsidy;
 
     // Setter functions for test setup
     function setEntryOwner(uint256 entryId, address owner) external {
@@ -36,14 +31,6 @@ contract TestStorage {
 
     function setSecondaryWinningEntry(uint256 entryId) external {
         secondaryWinningEntry = entryId;
-    }
-
-    function setSecondaryPrizePool(uint256 pool) external {
-        secondaryPrizePool = pool;
-    }
-
-    function setSecondaryPrizePoolSubsidy(uint256 subsidy) external {
-        secondaryPrizePoolSubsidy = subsidy;
     }
 
     function setCurrentState(uint8 state) external {
@@ -86,14 +73,11 @@ contract TestStorage {
         uint256 entryId,
         uint256 balance,
         uint8 state,
-        bool resolved
+        bool resolved,
+        uint256 winningEntry
     ) external view {
         SecondaryContest.validateClaimSecondaryPayout(
-            entryOwner,
-            entryId,
-            balance,
-            state,
-            resolved
+            entryOwner, entryId, balance, state, resolved, winningEntry
         );
     }
 
@@ -101,21 +85,18 @@ contract TestStorage {
         uint256 entryId,
         address participant,
         uint256 amount,
-        uint256 positionBonus,
-        uint256 crossSubsidy,
-        uint256 tokensToMint
+        uint256 primaryEntryInvestment,
+        uint256 ownerTokensReceived,
+        uint256 participantTokensReceived
     ) external {
         SecondaryContest.processAddSecondaryPosition(
             netPosition,
-            primaryPositionSubsidy,
-            secondaryToPrimarySubsidy,
-            secondaryDepositedPerEntry,
             entryId,
             participant,
             amount,
-            positionBonus,
-            crossSubsidy,
-            tokensToMint
+            primaryEntryInvestment,
+            ownerTokensReceived,
+            participantTokensReceived
         );
     }
 
@@ -123,45 +104,10 @@ contract TestStorage {
         uint256 entryId,
         address participant,
         uint256 tokenAmount,
-        uint256 userTotalTokens,
-        uint256 positionBonus,
-        uint256 crossRefund,
-        uint256 collateral
-    ) external returns (uint256 refundAmount) {
-        return SecondaryContest.processRemoveSecondaryPosition(
-            netPosition,
-            primaryPositionSubsidy,
-            secondaryToPrimarySubsidy,
-            secondaryDepositedPerEntry,
-            entryId,
-            participant,
-            tokenAmount,
-            userTotalTokens,
-            positionBonus,
-            crossRefund,
-            collateral
-        );
-    }
-
-    function processClaimSecondaryPayout(
-        uint256 entryId,
-        address /* participant */,
-        uint256 balance,
-        uint256 availableBalance
-    ) external returns (
-        uint256 payout,
-        bool shouldSweepDust,
-        uint256 fromBasePool,
-        uint256 fromSubsidyPool
-    ) {
-        return SecondaryContest.processClaimSecondaryPayout(
-            netPosition,
-            entryId,
-            balance,
-            secondaryWinningEntry,
-            secondaryPrizePool,
-            secondaryPrizePoolSubsidy,
-            availableBalance
+        uint256 proceeds
+    ) external {
+        SecondaryContest.processRemoveSecondaryPosition(
+            netPosition, entryId, participant, tokenAmount, proceeds
         );
     }
 }
@@ -178,7 +124,6 @@ contract TestStorage {
  * - validateClaimSecondaryPayout
  * - processAddSecondaryPosition
  * - processRemoveSecondaryPosition
- * - processClaimSecondaryPayout
  */
 contract SecondaryContestTest is Test {
     // Contest state enum (matches ContestController)
@@ -745,13 +690,30 @@ contract SecondaryContestTest is Test {
         _setState(ContestState.SETTLED);
         _createEntry(ENTRY_1, entryOwner1);
         testStorage.setSecondaryMarketResolved(true);
+        testStorage.setSecondaryWinningEntry(ENTRY_1);
         
-        // Should not revert
         testStorage.validateClaimSecondaryPayout(
             ENTRY_1,
             TOKENS_1,
             uint8(ContestState.SETTLED),
-            true
+            true,
+            ENTRY_1
+        );
+    }
+
+    function test_validateClaimSecondaryPayout_Invalid_NotWinningEntry() public {
+        _setState(ContestState.SETTLED);
+        _createEntry(ENTRY_1, entryOwner1);
+        testStorage.setSecondaryMarketResolved(true);
+        testStorage.setSecondaryWinningEntry(ENTRY_2);
+        
+        vm.expectRevert("Not winning entry");
+        testStorage.validateClaimSecondaryPayout(
+            ENTRY_1,
+            TOKENS_1,
+            uint8(ContestState.SETTLED),
+            true,
+            ENTRY_2
         );
     }
 
@@ -764,7 +726,8 @@ contract SecondaryContestTest is Test {
             ENTRY_1,
             TOKENS_1,
             uint8(ContestState.OPEN),
-            true
+            true,
+            ENTRY_1
         );
     }
 
@@ -777,7 +740,8 @@ contract SecondaryContestTest is Test {
             ENTRY_1,
             TOKENS_1,
             uint8(ContestState.ACTIVE),
-            true
+            true,
+            ENTRY_1
         );
     }
 
@@ -790,7 +754,8 @@ contract SecondaryContestTest is Test {
             ENTRY_1,
             TOKENS_1,
             uint8(ContestState.LOCKED),
-            true
+            true,
+            ENTRY_1
         );
     }
 
@@ -803,7 +768,8 @@ contract SecondaryContestTest is Test {
             ENTRY_1,
             TOKENS_1,
             uint8(ContestState.CLOSED),
-            true
+            true,
+            ENTRY_1
         );
     }
 
@@ -816,7 +782,8 @@ contract SecondaryContestTest is Test {
             ENTRY_1,
             TOKENS_1,
             uint8(ContestState.CANCELLED),
-            true
+            true,
+            ENTRY_1
         );
     }
 
@@ -829,7 +796,8 @@ contract SecondaryContestTest is Test {
             ENTRY_1,
             TOKENS_1,
             uint8(ContestState.SETTLED),
-            false
+            false,
+            ENTRY_1
         );
     }
 
@@ -841,7 +809,8 @@ contract SecondaryContestTest is Test {
             ENTRY_3,
             TOKENS_1,
             uint8(ContestState.SETTLED),
-            true
+            true,
+            ENTRY_3
         );
     }
 
@@ -855,33 +824,37 @@ contract SecondaryContestTest is Test {
             ENTRY_1,
             TOKENS_1,
             uint8(ContestState.SETTLED),
-            true
+            true,
+            ENTRY_1
         );
     }
 
     function test_validateClaimSecondaryPayout_Invalid_ZeroBalance() public {
         _setState(ContestState.SETTLED);
         _createEntry(ENTRY_1, entryOwner1);
+        testStorage.setSecondaryWinningEntry(ENTRY_1);
         
         vm.expectRevert("No tokens");
         testStorage.validateClaimSecondaryPayout(
             ENTRY_1,
             0,
             uint8(ContestState.SETTLED),
-            true
+            true,
+            ENTRY_1
         );
     }
 
     function test_validateClaimSecondaryPayout_Edge_OneWei() public {
         _setState(ContestState.SETTLED);
         _createEntry(ENTRY_1, entryOwner1);
+        testStorage.setSecondaryWinningEntry(ENTRY_1);
         
-        // Should not revert with 1 wei balance
         testStorage.validateClaimSecondaryPayout(
             ENTRY_1,
             1,
             uint8(ContestState.SETTLED),
-            true
+            true,
+            ENTRY_1
         );
     }
 
@@ -893,1229 +866,83 @@ contract SecondaryContestTest is Test {
         balance = bound(balance, 1, type(uint256).max);
         
         _createEntry(entryId, entryOwner1);
+        testStorage.setSecondaryWinningEntry(entryId);
         
         testStorage.validateClaimSecondaryPayout(
             entryId,
             balance,
             uint8(ContestState.SETTLED),
-            true
+            true,
+            entryId
         );
     }
 
-    // ============ processAddSecondaryPosition Tests ============
+    // ============ processAddSecondaryPosition / processRemoveSecondaryPosition ============
 
-    function test_processAddSecondaryPosition_Basic_WithBonuses() public {
-        uint256 positionBonus = 10e18;
-        uint256 crossSubsidy = 5e18;
-        
-        vm.expectEmit(true, true, false, false);
-        emit SecondaryContest.SecondaryPositionAdded(participant1, ENTRY_1, AMOUNT_1, TOKENS_1);
-        
-        testStorage.processAddSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            AMOUNT_1,
-            positionBonus,
-            crossSubsidy,
-            TOKENS_1
+    function test_processAddSecondaryPosition_emitsAndUpdatesNetPosition() public {
+        uint256 inv = 10e18;
+        uint256 ownerT = 5e18;
+        uint256 buyerT = 45e18;
+
+        vm.expectEmit(true, true, false, true);
+        emit SecondaryContest.SecondaryPositionAdded(
+            participant1, ENTRY_1, AMOUNT_1, buyerT, inv, ownerT
         );
-        
-        // Verify storage updates
-        assertEq(testStorage.primaryPositionSubsidy(ENTRY_1), positionBonus);
-        assertEq(testStorage.secondaryToPrimarySubsidy(participant1, ENTRY_1), crossSubsidy);
-        assertEq(testStorage.secondaryDepositedPerEntry(participant1, ENTRY_1), AMOUNT_1);
-        assertEq(uint256(testStorage.netPosition(ENTRY_1)), TOKENS_1);
+
+        testStorage.processAddSecondaryPosition(
+            ENTRY_1, participant1, AMOUNT_1, inv, ownerT, buyerT
+        );
+
+        assertEq(uint256(testStorage.netPosition(ENTRY_1)), ownerT + buyerT);
     }
 
-    function test_processAddSecondaryPosition_Basic_NoBonuses() public {
-        vm.expectEmit(true, true, false, false);
-        emit SecondaryContest.SecondaryPositionAdded(participant1, ENTRY_1, AMOUNT_1, TOKENS_1);
-        
-        testStorage.processAddSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            AMOUNT_1,
-            0, // positionBonus
-            0, // crossSubsidy
-            TOKENS_1
-        );
-        
-        // Verify storage updates
-        assertEq(testStorage.primaryPositionSubsidy(ENTRY_1), 0);
-        assertEq(testStorage.secondaryToPrimarySubsidy(participant1, ENTRY_1), 0);
-        assertEq(testStorage.secondaryDepositedPerEntry(participant1, ENTRY_1), AMOUNT_1);
-        assertEq(uint256(testStorage.netPosition(ENTRY_1)), TOKENS_1);
+    function test_processAddSecondaryPosition_multipleAddsAccumulate() public {
+        testStorage.processAddSecondaryPosition(ENTRY_1, participant1, AMOUNT_1, 5e18, 2e18, 43e18);
+        testStorage.processAddSecondaryPosition(ENTRY_1, participant2, AMOUNT_2, 10e18, 4e18, 86e18);
+        assertEq(uint256(testStorage.netPosition(ENTRY_1)), (2e18 + 43e18) + (4e18 + 86e18));
     }
 
-    function test_processAddSecondaryPosition_Basic_PositionBonusOnly() public {
-        uint256 positionBonus = 10e18;
-        
-        testStorage.processAddSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            AMOUNT_1,
-            positionBonus,
-            0, // crossSubsidy
-            TOKENS_1
+    function test_processRemoveSecondaryPosition_reducesNetPosition() public {
+        testStorage.processAddSecondaryPosition(ENTRY_1, participant1, AMOUNT_1, 0, 0, TOKENS_1);
+
+        vm.expectEmit(true, true, false, true);
+        emit SecondaryContest.SecondaryPositionSold(participant1, ENTRY_1, TOKENS_1 / 2, 25e18);
+
+        testStorage.processRemoveSecondaryPosition(
+            ENTRY_1, participant1, TOKENS_1 / 2, 25e18
         );
-        
-        assertEq(testStorage.primaryPositionSubsidy(ENTRY_1), positionBonus);
-        assertEq(testStorage.secondaryToPrimarySubsidy(participant1, ENTRY_1), 0);
+
+        assertEq(uint256(testStorage.netPosition(ENTRY_1)), TOKENS_1 / 2);
     }
 
-    function test_processAddSecondaryPosition_Basic_CrossSubsidyOnly() public {
-        uint256 crossSubsidy = 5e18;
-        
-        testStorage.processAddSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            AMOUNT_1,
-            0, // positionBonus
-            crossSubsidy,
-            TOKENS_1
-        );
-        
-        assertEq(testStorage.primaryPositionSubsidy(ENTRY_1), 0);
-        assertEq(testStorage.secondaryToPrimarySubsidy(participant1, ENTRY_1), crossSubsidy);
-    }
-
-    function test_processAddSecondaryPosition_MultiplePositions_SameEntry() public {
-        uint256 positionBonus1 = 10e18;
-        uint256 crossSubsidy1 = 5e18;
-        uint256 positionBonus2 = 20e18;
-        uint256 crossSubsidy2 = 10e18;
-        
-        // First position
-        testStorage.processAddSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            AMOUNT_1,
-            positionBonus1,
-            crossSubsidy1,
-            TOKENS_1
-        );
-        
-        // Second position
-        testStorage.processAddSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            AMOUNT_2,
-            positionBonus2,
-            crossSubsidy2,
-            TOKENS_2
-        );
-        
-        // Verify cumulative updates
-        assertEq(testStorage.primaryPositionSubsidy(ENTRY_1), positionBonus1 + positionBonus2);
-        assertEq(testStorage.secondaryToPrimarySubsidy(participant1, ENTRY_1), crossSubsidy1 + crossSubsidy2);
-        assertEq(testStorage.secondaryDepositedPerEntry(participant1, ENTRY_1), AMOUNT_1 + AMOUNT_2);
-        assertEq(uint256(testStorage.netPosition(ENTRY_1)), TOKENS_1 + TOKENS_2);
-    }
-
-    function test_processAddSecondaryPosition_MultiplePositions_DifferentEntries() public {
-        testStorage.processAddSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            AMOUNT_1,
-            10e18,
-            5e18,
-            TOKENS_1
-        );
-        
-        testStorage.processAddSecondaryPosition(
-            ENTRY_2,
-            participant1,
-            AMOUNT_2,
-            20e18,
-            10e18,
-            TOKENS_2
-        );
-        
-        // Verify entries are isolated
-        assertEq(testStorage.primaryPositionSubsidy(ENTRY_1), 10e18);
-        assertEq(testStorage.primaryPositionSubsidy(ENTRY_2), 20e18);
-        assertEq(uint256(testStorage.netPosition(ENTRY_1)), TOKENS_1);
-        assertEq(uint256(testStorage.netPosition(ENTRY_2)), TOKENS_2);
-    }
-
-    function test_processAddSecondaryPosition_MultipleParticipants_SameEntry() public {
-        testStorage.processAddSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            AMOUNT_1,
-            10e18,
-            5e18,
-            TOKENS_1
-        );
-        
-        testStorage.processAddSecondaryPosition(
-            ENTRY_1,
-            participant2,
-            AMOUNT_2,
-            20e18,
-            10e18,
-            TOKENS_2
-        );
-        
-        // Verify participant isolation
-        assertEq(testStorage.secondaryDepositedPerEntry(participant1, ENTRY_1), AMOUNT_1);
-        assertEq(testStorage.secondaryDepositedPerEntry(participant2, ENTRY_1), AMOUNT_2);
-        assertEq(testStorage.secondaryToPrimarySubsidy(participant1, ENTRY_1), 5e18);
-        assertEq(testStorage.secondaryToPrimarySubsidy(participant2, ENTRY_1), 10e18);
-        assertEq(uint256(testStorage.netPosition(ENTRY_1)), TOKENS_1 + TOKENS_2);
-    }
-
-    function test_processAddSecondaryPosition_Edge_ZeroTokens() public {
-        testStorage.processAddSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            AMOUNT_1,
-            10e18,
-            5e18,
-            0 // tokensToMint
-        );
-        
-        // Should still update deposits and bonuses, but not netPosition
-        assertEq(testStorage.primaryPositionSubsidy(ENTRY_1), 10e18);
-        assertEq(testStorage.secondaryDepositedPerEntry(participant1, ENTRY_1), AMOUNT_1);
-        assertEq(uint256(testStorage.netPosition(ENTRY_1)), 0);
-    }
-
-    function test_processAddSecondaryPosition_Edge_VeryLargeValues() public {
-        uint256 largeAmount = type(uint256).max / 2;
-        uint256 largeBonus = type(uint256).max / 4;
-        uint256 largeTokens = type(uint256).max / 8;
-        
-        testStorage.processAddSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            largeAmount,
-            largeBonus,
-            largeBonus / 2,
-            largeTokens
-        );
-        
-        assertEq(testStorage.primaryPositionSubsidy(ENTRY_1), largeBonus);
-        assertEq(testStorage.secondaryDepositedPerEntry(participant1, ENTRY_1), largeAmount);
-        assertEq(uint256(testStorage.netPosition(ENTRY_1)), largeTokens);
-    }
-
-    function testFuzz_processAddSecondaryPosition(
-        uint256 entryId,
-        address participant,
-        uint256 amount,
-        uint256 positionBonus,
-        uint256 crossSubsidy,
-        uint256 tokensToMint
+    function testFuzz_processAddRemove_netPositionConsistent(
+        uint256 ownerT,
+        uint256 buyerT,
+        uint256 burnAmt
     ) public {
-        entryId = bound(entryId, 1, 1000);
-        amount = bound(amount, 1, type(uint256).max / 4);
-        positionBonus = bound(positionBonus, 0, type(uint256).max / 4);
-        crossSubsidy = bound(crossSubsidy, 0, type(uint256).max / 4);
-        tokensToMint = bound(tokensToMint, 0, type(uint256).max / 4);
-        
-        uint256 initialSubsidy = testStorage.primaryPositionSubsidy(entryId);
-        uint256 initialCrossSubsidy = testStorage.secondaryToPrimarySubsidy(participant, entryId);
-        uint256 initialDeposited = testStorage.secondaryDepositedPerEntry(participant, entryId);
-        int256 initialNetPosition = testStorage.netPosition(entryId);
-        
-        testStorage.processAddSecondaryPosition(
-            entryId,
-            participant,
-            amount,
-            positionBonus,
-            crossSubsidy,
-            tokensToMint
-        );
-        
-        // Verify updates
-        assertEq(
-            testStorage.primaryPositionSubsidy(entryId),
-            initialSubsidy + positionBonus
-        );
-        assertEq(
-            testStorage.secondaryToPrimarySubsidy(participant, entryId),
-            initialCrossSubsidy + crossSubsidy
-        );
-        assertEq(
-            testStorage.secondaryDepositedPerEntry(participant, entryId),
-            initialDeposited + amount
-        );
-        assertEq(
-            uint256(testStorage.netPosition(entryId)),
-            uint256(initialNetPosition) + tokensToMint
-        );
+        ownerT = bound(ownerT, 1, 1e24);
+        buyerT = bound(buyerT, 1, 1e24);
+        uint256 total = ownerT + buyerT;
+        burnAmt = bound(burnAmt, 1, total);
+
+        uint256 amount = AMOUNT_1;
+        testStorage.processAddSecondaryPosition(ENTRY_1, participant1, amount, 1, ownerT, buyerT);
+        testStorage.processRemoveSecondaryPosition(ENTRY_1, participant1, burnAmt, 1);
+        assertEq(uint256(testStorage.netPosition(ENTRY_1)), total - burnAmt);
     }
 
-    // ============ processRemoveSecondaryPosition Tests ============
-
-    function test_processRemoveSecondaryPosition_Basic_Partial() public {
-        // Setup: Add position first
-        testStorage.processAddSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            AMOUNT_2, // 200e18
-            10e18,
-            5e18,
-            TOKENS_2 // 100e18
-        );
-        
-        uint256 tokenAmount = TOKENS_1; // 50e18 (half)
-        uint256 userTotalTokens = TOKENS_2; // 100e18
-        uint256 positionBonus = 5e18; // Half of original
-        uint256 crossRefund = 2.5e18; // Half of original
-        
-        vm.expectEmit(true, false, false, false);
-        emit SecondaryContest.SecondaryPositionRemoved(participant1, AMOUNT_1);
-        
-        uint256 refundAmount = testStorage.processRemoveSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            tokenAmount,
-            userTotalTokens,
-            positionBonus,
-            crossRefund,
-            0 // collateral not used in library
-        );
-        
-        // Verify refund calculation: (200e18 * 50e18) / 100e18 = 100e18
-        assertEq(refundAmount, AMOUNT_1);
-        
-        // Verify storage updates
-        assertEq(testStorage.primaryPositionSubsidy(ENTRY_1), 10e18 - 5e18);
-        assertEq(testStorage.secondaryDepositedPerEntry(participant1, ENTRY_1), AMOUNT_1);
-        assertEq(testStorage.secondaryToPrimarySubsidy(participant1, ENTRY_1), 5e18 - 2.5e18);
-        assertEq(uint256(testStorage.netPosition(ENTRY_1)), TOKENS_1);
+    function test_Integration_addPartialRemoveAdd() public {
+        testStorage.processAddSecondaryPosition(ENTRY_1, participant1, AMOUNT_1, 2e18, 3e18, 45e18);
+        testStorage.processRemoveSecondaryPosition(ENTRY_1, participant1, 25e18, 50e18);
+        testStorage.processAddSecondaryPosition(ENTRY_1, participant1, AMOUNT_2, 1e18, 1e18, 98e18);
+        assertGt(uint256(testStorage.netPosition(ENTRY_1)), 0);
     }
 
-    function test_processRemoveSecondaryPosition_Basic_Full() public {
-        // Setup
-        testStorage.processAddSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            AMOUNT_1,
-            10e18,
-            5e18,
-            TOKENS_1
-        );
-        
-        uint256 refundAmount = testStorage.processRemoveSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            TOKENS_1, // Full amount
-            TOKENS_1, // Full balance
-            10e18, // Full positionBonus
-            5e18, // Full crossRefund
-            0
-        );
-        
-        // Verify full refund
-        assertEq(refundAmount, AMOUNT_1);
-        assertEq(testStorage.primaryPositionSubsidy(ENTRY_1), 0);
-        assertEq(testStorage.secondaryDepositedPerEntry(participant1, ENTRY_1), 0);
-        assertEq(testStorage.secondaryToPrimarySubsidy(participant1, ENTRY_1), 0);
+    function test_Integration_perEntryIsolation() public {
+        testStorage.processAddSecondaryPosition(ENTRY_1, participant1, AMOUNT_1, 0, 0, TOKENS_1);
+        testStorage.processAddSecondaryPosition(ENTRY_2, participant1, AMOUNT_2, 0, 0, TOKENS_2);
+        testStorage.processRemoveSecondaryPosition(ENTRY_1, participant1, TOKENS_1, 100e18);
         assertEq(uint256(testStorage.netPosition(ENTRY_1)), 0);
-    }
-
-    function test_processRemoveSecondaryPosition_RefundCalculation_50Percent() public {
-        uint256 deposit = 200e18;
-        testStorage.processAddSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            deposit,
-            0,
-            0,
-            TOKENS_2 // 100e18
-        );
-        
-        // Remove 50% of tokens
-        uint256 refundAmount = testStorage.processRemoveSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            TOKENS_1, // 50e18 (50%)
-            TOKENS_2, // 100e18
-            0,
-            0,
-            0
-        );
-        
-        // Should get 50% of deposit back
-        assertEq(refundAmount, deposit / 2);
-        assertEq(testStorage.secondaryDepositedPerEntry(participant1, ENTRY_1), deposit / 2);
-    }
-
-    function test_processRemoveSecondaryPosition_RefundCalculation_100Percent() public {
-        uint256 deposit = AMOUNT_1;
-        testStorage.processAddSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            deposit,
-            0,
-            0,
-            TOKENS_1
-        );
-        
-        uint256 refundAmount = testStorage.processRemoveSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            TOKENS_1,
-            TOKENS_1,
-            0,
-            0,
-            0
-        );
-        
-        // Should get 100% of deposit back
-        assertEq(refundAmount, deposit);
-        assertEq(testStorage.secondaryDepositedPerEntry(participant1, ENTRY_1), 0);
-    }
-
-    function test_processRemoveSecondaryPosition_Edge_ZeroPositionBonus() public {
-        testStorage.processAddSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            AMOUNT_1,
-            0, // No position bonus
-            0,
-            TOKENS_1
-        );
-        
-        // Should not underflow
-        uint256 refundAmount = testStorage.processRemoveSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            TOKENS_1,
-            TOKENS_1,
-            0, // positionBonus = 0
-            0,
-            0
-        );
-        
-        assertEq(refundAmount, AMOUNT_1);
-        assertEq(testStorage.primaryPositionSubsidy(ENTRY_1), 0);
-    }
-
-    function test_processRemoveSecondaryPosition_Edge_ZeroCrossRefund() public {
-        testStorage.processAddSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            AMOUNT_1,
-            0,
-            0, // No cross subsidy
-            TOKENS_1
-        );
-        
-        // Should not underflow
-        uint256 refundAmount = testStorage.processRemoveSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            TOKENS_1,
-            TOKENS_1,
-            0,
-            0, // crossRefund = 0
-            0
-        );
-        
-        assertEq(refundAmount, AMOUNT_1);
-        assertEq(testStorage.secondaryToPrimarySubsidy(participant1, ENTRY_1), 0);
-    }
-
-    function test_processRemoveSecondaryPosition_Edge_VerySmallTokenAmount() public {
-        testStorage.processAddSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            AMOUNT_1,
-            0,
-            0,
-            TOKENS_2 // 100e18
-        );
-        
-        uint256 smallAmount = 1; // 1 wei
-        uint256 refundAmount = testStorage.processRemoveSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            smallAmount,
-            TOKENS_2,
-            0,
-            0,
-            0
-        );
-        
-        // Should calculate proportionally
-        assertEq(refundAmount, (AMOUNT_1 * smallAmount) / TOKENS_2);
-    }
-
-    function test_processRemoveSecondaryPosition_MultipleRemovals() public {
-        // Setup
-        testStorage.processAddSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            AMOUNT_2, // 200e18
-            10e18,
-            5e18,
-            TOKENS_2 // 100e18
-        );
-        
-        // First removal: 25%
-        uint256 refund1 = testStorage.processRemoveSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            TOKENS_1 / 2, // 25e18
-            TOKENS_2,
-            2.5e18,
-            1.25e18,
-            0
-        );
-        
-        assertEq(refund1, AMOUNT_2 / 4);
-        assertEq(testStorage.secondaryDepositedPerEntry(participant1, ENTRY_1), AMOUNT_2 * 3 / 4);
-        
-        // Second removal: another 25%
-        uint256 remainingTokens = TOKENS_2 - TOKENS_1 / 2; // 75e18
-        uint256 refund2 = testStorage.processRemoveSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            TOKENS_1 / 2, // 25e18
-            remainingTokens,
-            2.5e18,
-            1.25e18,
-            0
-        );
-        
-        assertEq(refund2, (AMOUNT_2 * 3 / 4) / 3); // 25% of remaining
-    }
-
-    function testFuzz_processRemoveSecondaryPosition(
-        uint256 entryId,
-        address participant,
-        uint256 deposit,
-        uint256 tokenAmount,
-        uint256 userTotalTokens,
-        uint256 positionBonus,
-        uint256 crossSubsidy
-    ) public {
-        entryId = bound(entryId, 1, 1000);
-        // Use more conservative bounds to avoid overflow in calculations
-        deposit = bound(deposit, 1, 1e30);
-        userTotalTokens = bound(userTotalTokens, 1, 1e30);
-        tokenAmount = bound(tokenAmount, 1, userTotalTokens);
-        // Limit bonuses to reasonable values relative to deposit
-        positionBonus = bound(positionBonus, 0, deposit);
-        crossSubsidy = bound(crossSubsidy, 0, deposit);
-        
-        // Setup: Add position (use crossSubsidy, not crossRefund)
-        testStorage.processAddSecondaryPosition(
-            entryId,
-            participant,
-            deposit,
-            positionBonus,
-            crossSubsidy, // This is what gets stored
-            userTotalTokens
-        );
-        
-        uint256 initialSubsidy = testStorage.primaryPositionSubsidy(entryId);
-        uint256 initialCrossSubsidy = testStorage.secondaryToPrimarySubsidy(participant, entryId);
-        uint256 initialDeposited = testStorage.secondaryDepositedPerEntry(participant, entryId);
-        int256 initialNetPosition = testStorage.netPosition(entryId);
-        
-        // Calculate expected refund and proportional reductions
-        // Use actual stored values, not input parameters (which may have been different)
-        // Ensure we don't divide by zero
-        if (userTotalTokens == 0) {
-            return; // Skip if invalid
-        }
-        
-        uint256 expectedRefund = (initialDeposited * tokenAmount) / userTotalTokens;
-        
-        // Calculate proportional reductions from stored values
-        // Use safe math to prevent underflow - calculate proportionally
-        // IMPORTANT: These values are passed to the library which does unchecked subtraction
-        // So we MUST ensure they never exceed what's stored
-        uint256 expectedPositionBonus = 0;
-        if (initialSubsidy > 0 && userTotalTokens > 0) {
-            // Calculate proportion: (tokenAmount / userTotalTokens) * initialSubsidy
-            // Use checked math to prevent any possibility of exceeding stored value
-            uint256 bonusNumerator = initialSubsidy * tokenAmount;
-            if (bonusNumerator / initialSubsidy == tokenAmount && bonusNumerator >= initialSubsidy) {
-                expectedPositionBonus = bonusNumerator / userTotalTokens;
-            } else {
-                // Use division first to avoid overflow, but may lose precision
-                expectedPositionBonus = (initialSubsidy / userTotalTokens) * tokenAmount;
-            }
-            // CRITICAL: Cap at stored value to prevent underflow in library
-            if (expectedPositionBonus > initialSubsidy) {
-                expectedPositionBonus = initialSubsidy;
-            }
-        }
-        
-        uint256 expectedCrossRefund = 0;
-        if (initialCrossSubsidy > 0 && userTotalTokens > 0) {
-            uint256 crossNumerator = initialCrossSubsidy * tokenAmount;
-            if (crossNumerator / initialCrossSubsidy == tokenAmount && crossNumerator >= initialCrossSubsidy) {
-                expectedCrossRefund = crossNumerator / userTotalTokens;
-            } else {
-                expectedCrossRefund = (initialCrossSubsidy / userTotalTokens) * tokenAmount;
-            }
-            // CRITICAL: Cap at stored value to prevent underflow in library
-            if (expectedCrossRefund > initialCrossSubsidy) {
-                expectedCrossRefund = initialCrossSubsidy;
-            }
-        }
-        
-        uint256 refundAmount = testStorage.processRemoveSecondaryPosition(
-            entryId,
-            participant,
-            tokenAmount,
-            userTotalTokens,
-            expectedPositionBonus,
-            expectedCrossRefund,
-            0
-        );
-        
-        // Verify refund
-        assertEq(refundAmount, expectedRefund);
-        
-        // Verify storage updates (use safe subtraction)
-        uint256 finalSubsidy = initialSubsidy >= expectedPositionBonus 
-            ? initialSubsidy - expectedPositionBonus 
-            : 0;
-        assertEq(testStorage.primaryPositionSubsidy(entryId), finalSubsidy);
-        
-        uint256 finalDeposited = initialDeposited >= expectedRefund 
-            ? initialDeposited - expectedRefund 
-            : 0;
-        assertEq(testStorage.secondaryDepositedPerEntry(participant, entryId), finalDeposited);
-        
-        uint256 finalCrossSubsidy = initialCrossSubsidy >= expectedCrossRefund 
-            ? initialCrossSubsidy - expectedCrossRefund 
-            : 0;
-        assertEq(testStorage.secondaryToPrimarySubsidy(participant, entryId), finalCrossSubsidy);
-        
-        assertEq(
-            uint256(testStorage.netPosition(entryId)),
-            uint256(initialNetPosition) >= tokenAmount 
-                ? uint256(initialNetPosition) - tokenAmount 
-                : 0
-        );
-    }
-
-    // ============ processClaimSecondaryPayout Tests ============
-
-    function test_processClaimSecondaryPayout_Winner_Basic() public {
-        // Setup
-        testStorage.setSecondaryWinningEntry(ENTRY_1);
-        testStorage.setSecondaryPrizePool(1000e18);
-        testStorage.setSecondaryPrizePoolSubsidy(500e18);
-        testStorage.setNetPosition(ENTRY_1, int256(TOKENS_2)); // 100e18 total supply
-        
-        uint256 balance = TOKENS_1; // 50e18 (50% of supply)
-        uint256 availableBalance = 2000e18;
-        
-        (uint256 payout, bool shouldSweepDust, uint256 fromBasePool, uint256 fromSubsidyPool) =
-            testStorage.processClaimSecondaryPayout(
-                ENTRY_1,
-                participant1,
-                balance,
-                availableBalance
-            );
-        
-        // Payout = (50e18 * 1500e18) / 100e18 = 750e18
-        assertEq(payout, 750e18);
-        assertFalse(shouldSweepDust); // Not last claim
-        assertEq(fromBasePool, 500e18); // (750e18 * 1000e18) / 1500e18
-        assertEq(fromSubsidyPool, 250e18); // 750e18 - 500e18
-        assertEq(uint256(testStorage.netPosition(ENTRY_1)), TOKENS_1); // 50e18 remaining
-    }
-
-    function test_processClaimSecondaryPayout_Winner_LastClaim() public {
-        // Setup: Only one participant
-        testStorage.setSecondaryWinningEntry(ENTRY_1);
-        testStorage.setSecondaryPrizePool(1000e18);
-        testStorage.setSecondaryPrizePoolSubsidy(500e18);
-        testStorage.setNetPosition(ENTRY_1, int256(TOKENS_1)); // 50e18 total supply
-        
-        uint256 balance = TOKENS_1; // All tokens
-        uint256 availableBalance = 2000e18;
-        
-        (uint256 payout, bool shouldSweepDust, , ) = testStorage.processClaimSecondaryPayout(
-            ENTRY_1,
-            participant1,
-            balance,
-            availableBalance
-        );
-        
-        assertEq(payout, 1500e18); // All funds
-        assertTrue(shouldSweepDust); // Last claim
-        assertEq(uint256(testStorage.netPosition(ENTRY_1)), 0);
-    }
-
-    function test_processClaimSecondaryPayout_NonWinner() public {
-        // Setup: Winning entry is ENTRY_2
-        testStorage.setSecondaryWinningEntry(ENTRY_2);
-        testStorage.setSecondaryPrizePool(1000e18);
-        testStorage.setSecondaryPrizePoolSubsidy(500e18);
-        testStorage.setNetPosition(ENTRY_1, int256(TOKENS_1));
-        
-        uint256 balance = TOKENS_1;
-        uint256 availableBalance = 2000e18;
-        
-        (uint256 payout, bool shouldSweepDust, uint256 fromBasePool, uint256 fromSubsidyPool) =
-            testStorage.processClaimSecondaryPayout(
-                ENTRY_1, // Non-winning entry
-                participant1,
-                balance,
-                availableBalance
-            );
-        
-        assertEq(payout, 0);
-        assertFalse(shouldSweepDust);
-        assertEq(fromBasePool, 0);
-        assertEq(fromSubsidyPool, 0);
-        assertEq(uint256(testStorage.netPosition(ENTRY_1)), TOKENS_1); // Unchanged
-    }
-
-    function test_processClaimSecondaryPayout_Safety_CappedAtAvailable() public {
-        testStorage.setSecondaryWinningEntry(ENTRY_1);
-        testStorage.setSecondaryPrizePool(1000e18);
-        testStorage.setSecondaryPrizePoolSubsidy(500e18);
-        testStorage.setNetPosition(ENTRY_1, int256(TOKENS_1));
-        
-        uint256 balance = TOKENS_1;
-        uint256 availableBalance = 100e18; // Less than calculated payout
-        
-        (uint256 payout, , uint256 fromBasePool, uint256 fromSubsidyPool) =
-            testStorage.processClaimSecondaryPayout(
-                ENTRY_1,
-                participant1,
-                balance,
-                availableBalance
-            );
-        
-        // Payout should be capped at availableBalance
-        assertEq(payout, availableBalance);
-        
-        // Pool calculations should still be correct
-        uint256 totalFunds = 1500e18;
-        assertEq(fromBasePool, (payout * 1000e18) / totalFunds);
-        assertEq(fromSubsidyPool, payout - fromBasePool);
-    }
-
-    function test_processClaimSecondaryPayout_PoolCalculations() public {
-        testStorage.setSecondaryWinningEntry(ENTRY_1);
-        testStorage.setSecondaryPrizePool(2000e18);
-        testStorage.setSecondaryPrizePoolSubsidy(1000e18);
-        testStorage.setNetPosition(ENTRY_1, int256(TOKENS_2)); // 100e18
-        
-        uint256 balance = TOKENS_1; // 50e18 (50%)
-        uint256 availableBalance = 5000e18;
-        
-        (uint256 payout, , uint256 fromBasePool, uint256 fromSubsidyPool) =
-            testStorage.processClaimSecondaryPayout(
-                ENTRY_1,
-                participant1,
-                balance,
-                availableBalance
-            );
-        
-        // Payout = (50e18 * 3000e18) / 100e18 = 1500e18
-        assertEq(payout, 1500e18);
-        
-        // fromBasePool = (1500e18 * 2000e18) / 3000e18 = 1000e18
-        assertEq(fromBasePool, 1000e18);
-        
-        // fromSubsidyPool = 1500e18 - 1000e18 = 500e18
-        assertEq(fromSubsidyPool, 500e18);
-    }
-
-    function test_processClaimSecondaryPayout_Edge_ZeroSupply() public {
-        testStorage.setSecondaryWinningEntry(ENTRY_1);
-        testStorage.setSecondaryPrizePool(1000e18);
-        testStorage.setSecondaryPrizePoolSubsidy(500e18);
-        testStorage.setNetPosition(ENTRY_1, int256(0)); // Zero supply
-        
-        uint256 balance = TOKENS_1;
-        uint256 availableBalance = 2000e18;
-        
-        (uint256 payout, , , ) = testStorage.processClaimSecondaryPayout(
-            ENTRY_1,
-            participant1,
-            balance,
-            availableBalance
-        );
-        
-        // Should return 0 payout when supply is 0
-        assertEq(payout, 0);
-    }
-
-    function test_processClaimSecondaryPayout_Edge_OneWei() public {
-        testStorage.setSecondaryWinningEntry(ENTRY_1);
-        testStorage.setSecondaryPrizePool(1000e18);
-        testStorage.setSecondaryPrizePoolSubsidy(500e18);
-        testStorage.setNetPosition(ENTRY_1, int256(1)); // 1 wei supply
-        
-        uint256 balance = 1; // 1 wei
-        uint256 availableBalance = 2000e18;
-        
-        (uint256 payout, , , ) = testStorage.processClaimSecondaryPayout(
-            ENTRY_1,
-            participant1,
-            balance,
-            availableBalance
-        );
-        
-        // Should get all funds
-        assertEq(payout, 1500e18);
-        assertTrue(testStorage.netPosition(ENTRY_1) == 0);
-    }
-
-    function test_processClaimSecondaryPayout_Edge_ZeroTotalFunds() public {
-        testStorage.setSecondaryWinningEntry(ENTRY_1);
-        testStorage.setSecondaryPrizePool(0);
-        testStorage.setSecondaryPrizePoolSubsidy(0);
-        testStorage.setNetPosition(ENTRY_1, int256(TOKENS_1));
-        
-        uint256 balance = TOKENS_1;
-        uint256 availableBalance = 2000e18;
-        
-        (uint256 payout, , uint256 fromBasePool, uint256 fromSubsidyPool) =
-            testStorage.processClaimSecondaryPayout(
-                ENTRY_1,
-                participant1,
-                balance,
-                availableBalance
-            );
-        
-        // Should return 0 when no funds
-        assertEq(payout, 0);
-        assertEq(fromBasePool, 0);
-        assertEq(fromSubsidyPool, 0);
-    }
-
-    function test_processClaimSecondaryPayout_MultipleClaims() public {
-        testStorage.setSecondaryWinningEntry(ENTRY_1);
-        testStorage.setSecondaryPrizePool(1000e18);
-        testStorage.setSecondaryPrizePoolSubsidy(500e18);
-        testStorage.setNetPosition(ENTRY_1, int256(TOKENS_2)); // 100e18 total
-        
-        uint256 availableBalance = 2000e18;
-        
-        // First claim: 25% of supply
-        (uint256 payout1, bool sweep1, , ) = testStorage.processClaimSecondaryPayout(
-            ENTRY_1,
-            participant1,
-            TOKENS_1 / 2, // 25e18
-            availableBalance
-        );
-        
-        assertEq(payout1, 375e18); // 25% of 1500e18
-        assertFalse(sweep1);
-        assertEq(uint256(testStorage.netPosition(ENTRY_1)), 75e18);
-        
-        // Second claim: another 25% of original supply (25e18 out of remaining 75e18)
-        // Remaining funds: 1500e18 - 375e18 = 1125e18
-        // Remaining supply: 75e18
-        // Payout: (25e18 * 1125e18) / 75e18 = 375e18
-        // But if pools aren't updated (as in real usage), it uses full pools: (25e18 * 1500e18) / 75e18 = 500e18
-        (uint256 payout2, bool sweep2, , ) = testStorage.processClaimSecondaryPayout(
-            ENTRY_1,
-            participant2,
-            TOKENS_1 / 2, // 25e18
-            availableBalance
-        );
-        
-        // Payout is based on current supply (75e18), so 25e18 / 75e18 = 1/3 of remaining funds
-        // But since pools aren't updated in this test, it uses full 1500e18: (25e18 * 1500e18) / 75e18 = 500e18
-        assertEq(payout2, 500e18);
-        assertFalse(sweep2);
-        assertEq(uint256(testStorage.netPosition(ENTRY_1)), 50e18);
-        
-        // Third claim: remaining 50% of original supply (50e18 out of remaining 50e18)
-        // Remaining supply: 50e18
-        // Since pools aren't updated in this test, it uses full 1500e18: (50e18 * 1500e18) / 50e18 = 1500e18
-        (uint256 payout3, bool sweep3, , ) = testStorage.processClaimSecondaryPayout(
-            ENTRY_1,
-            participant3,
-            TOKENS_1, // 50e18
-            availableBalance
-        );
-        
-        // Payout is based on current supply (50e18), so 50e18 / 50e18 = 100% of remaining funds
-        // Since pools aren't updated, it uses full 1500e18
-        assertEq(payout3, 1500e18);
-        assertTrue(sweep3); // Last claim
-        assertEq(uint256(testStorage.netPosition(ENTRY_1)), 0);
-    }
-
-    function testFuzz_processClaimSecondaryPayout(
-        uint256 entryId,
-        uint256 winningEntry,
-        uint256 balance,
-        uint256 totalSupply,
-        uint256 prizePool,
-        uint256 prizePoolSubsidy,
-        uint256 availableBalance
-    ) public {
-        entryId = bound(entryId, 1, 1000);
-        winningEntry = bound(winningEntry, 1, 1000);
-        
-        // Use realistic bounds to prevent overflow while still testing edge cases
-        // Max totalSupply: 1e30 (very large but safe for calculations)
-        totalSupply = bound(totalSupply, 1, 1e30);
-        balance = bound(balance, 1, totalSupply);
-        
-        // Prevent overflow: balance * totalFunds must not overflow
-        // Use sqrt(max_uint256) as safe upper bound for each component
-        uint256 maxSafeValue = 1e38; // Safe for multiplication without overflow
-        prizePool = bound(prizePool, 0, maxSafeValue);
-        prizePoolSubsidy = bound(prizePoolSubsidy, 0, maxSafeValue);
-        
-        // Ensure balance * (prizePool + prizePoolSubsidy) doesn't overflow
-        uint256 totalFunds = prizePool + prizePoolSubsidy;
-        if (totalFunds > 0 && balance > type(uint256).max / totalFunds) {
-            // Adjust balance to prevent overflow in multiplication
-            balance = bound(balance, 1, type(uint256).max / totalFunds);
-        }
-        
-        // Ensure availableBalance is reasonable
-        availableBalance = bound(availableBalance, 0, type(uint256).max / 2);
-        
-        testStorage.setSecondaryWinningEntry(winningEntry);
-        testStorage.setSecondaryPrizePool(prizePool);
-        testStorage.setSecondaryPrizePoolSubsidy(prizePoolSubsidy);
-        testStorage.setNetPosition(entryId, int256(totalSupply));
-        
-        int256 initialNetPosition = testStorage.netPosition(entryId);
-        
-        (uint256 payout, bool shouldSweepDust, uint256 fromBasePool, uint256 fromSubsidyPool) =
-            testStorage.processClaimSecondaryPayout(
-                entryId,
-                participant1,
-                balance,
-                availableBalance
-            );
-        
-        if (entryId == winningEntry && totalSupply > 0) {
-            uint256 expectedPayout = (balance * totalFunds) / totalSupply;
-            
-            if (expectedPayout > availableBalance) {
-                expectedPayout = availableBalance;
-            }
-            
-            assertEq(payout, expectedPayout, "Payout should match expected calculation");
-            
-            if (payout > 0 && totalFunds > 0) {
-                assertEq(fromBasePool, (payout * prizePool) / totalFunds, "Base pool reduction should be proportional");
-                assertEq(fromSubsidyPool, payout - fromBasePool, "Subsidy pool reduction should be remainder");
-            }
-            
-            uint256 remainingSupply = uint256(testStorage.netPosition(entryId));
-            assertEq(remainingSupply, totalSupply - balance, "Net position should decrease by balance");
-            assertEq(shouldSweepDust, remainingSupply == 0, "Should sweep dust only when no supply remains");
-        } else {
-            assertEq(payout, 0, "Non-winning entry should have zero payout");
-            assertFalse(shouldSweepDust, "Should not sweep dust for non-winning entry");
-            assertEq(fromBasePool, 0, "Base pool reduction should be zero for non-winning entry");
-            assertEq(fromSubsidyPool, 0, "Subsidy pool reduction should be zero for non-winning entry");
-            assertEq(uint256(testStorage.netPosition(entryId)), uint256(initialNetPosition), "Net position should be unchanged for non-winning entry");
-        }
-    }
-
-    // ============ Integration Tests ============
-
-    function test_Integration_FullLifecycle() public {
-        // 1. Add position
-        testStorage.processAddSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            AMOUNT_1,
-            10e18,
-            5e18,
-            TOKENS_1
-        );
-        
-        assertEq(testStorage.secondaryDepositedPerEntry(participant1, ENTRY_1), AMOUNT_1);
-        assertEq(uint256(testStorage.netPosition(ENTRY_1)), TOKENS_1);
-        
-        // 2. Remove partial position
-        uint256 refundAmount = testStorage.processRemoveSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            TOKENS_1 / 2,
-            TOKENS_1,
-            5e18,
-            2.5e18,
-            0
-        );
-        
-        assertEq(refundAmount, AMOUNT_1 / 2);
-        assertEq(testStorage.secondaryDepositedPerEntry(participant1, ENTRY_1), AMOUNT_1 / 2);
-        
-        // 3. Add position again
-        testStorage.processAddSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            AMOUNT_1,
-            10e18,
-            5e18,
-            TOKENS_1
-        );
-        
-        assertEq(testStorage.secondaryDepositedPerEntry(participant1, ENTRY_1), AMOUNT_1 / 2 + AMOUNT_1);
-        
-        // 4. Setup for claim
-        testStorage.setSecondaryWinningEntry(ENTRY_1);
-        testStorage.setSecondaryPrizePool(1000e18);
-        testStorage.setSecondaryPrizePoolSubsidy(500e18);
-        
-        // 5. Claim payout
-        (uint256 payout, , , ) = testStorage.processClaimSecondaryPayout(
-            ENTRY_1,
-            participant1,
-            TOKENS_1 + TOKENS_1 / 2, // Total balance
-            2000e18
-        );
-        
-        assertGt(payout, 0);
-    }
-
-    function test_Integration_MultipleEntries_Isolation() public {
-        // Add positions to different entries
-        testStorage.processAddSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            AMOUNT_1,
-            10e18,
-            5e18,
-            TOKENS_1
-        );
-        
-        testStorage.processAddSecondaryPosition(
-            ENTRY_2,
-            participant1,
-            AMOUNT_2,
-            20e18,
-            10e18,
-            TOKENS_2
-        );
-        
-        // Verify isolation
-        assertEq(testStorage.primaryPositionSubsidy(ENTRY_1), 10e18);
-        assertEq(testStorage.primaryPositionSubsidy(ENTRY_2), 20e18);
-        assertEq(uint256(testStorage.netPosition(ENTRY_1)), TOKENS_1);
         assertEq(uint256(testStorage.netPosition(ENTRY_2)), TOKENS_2);
-        
-        // Remove from one entry
-        testStorage.processRemoveSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            TOKENS_1,
-            TOKENS_1,
-            10e18,
-            5e18,
-            0
-        );
-        
-        // Other entry should be unaffected
-        assertEq(testStorage.primaryPositionSubsidy(ENTRY_2), 20e18);
-        assertEq(uint256(testStorage.netPosition(ENTRY_2)), TOKENS_2);
-    }
-
-    function test_Integration_CrossSubsidyTracking() public {
-        // Add multiple positions to accumulate cross-subsidy
-        testStorage.processAddSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            AMOUNT_1,
-            0,
-            5e18, // crossSubsidy
-            TOKENS_1
-        );
-        
-        testStorage.processAddSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            AMOUNT_1,
-            0,
-            10e18, // More crossSubsidy
-            TOKENS_1
-        );
-        
-        // Verify accumulation
-        assertEq(testStorage.secondaryToPrimarySubsidy(participant1, ENTRY_1), 15e18);
-        
-        // Remove partial position
-        testStorage.processRemoveSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            TOKENS_1,
-            TOKENS_1 + TOKENS_1, // Total tokens
-            0,
-            5e18, // Proportional crossRefund
-            0
-        );
-        
-        // Should have proportional reduction
-        assertEq(testStorage.secondaryToPrimarySubsidy(participant1, ENTRY_1), 10e18);
-    }
-
-    function test_Integration_DepositTracking_PartialRemovals() public {
-        uint256 deposit = 200e18;
-        testStorage.processAddSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            deposit,
-            0,
-            0,
-            TOKENS_2 // 100e18
-        );
-        
-        // Remove 25%
-        uint256 refund1 = testStorage.processRemoveSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            TOKENS_1 / 2, // 25e18
-            TOKENS_2,
-            0,
-            0,
-            0
-        );
-        
-        assertEq(refund1, deposit / 4);
-        assertEq(testStorage.secondaryDepositedPerEntry(participant1, ENTRY_1), deposit * 3 / 4);
-        
-        // Remove another 25%
-        uint256 remainingTokens = TOKENS_2 - TOKENS_1 / 2;
-        uint256 refund2 = testStorage.processRemoveSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            TOKENS_1 / 2,
-            remainingTokens,
-            0,
-            0,
-            0
-        );
-        
-        assertEq(refund2, (deposit * 3 / 4) / 3);
-        assertEq(testStorage.secondaryDepositedPerEntry(participant1, ENTRY_1), deposit / 2);
-    }
-
-    // ============ Invariant Tests ============
-
-    function test_invariant_NetPosition_AddRemove() public {
-        // Add position
-        testStorage.processAddSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            AMOUNT_1,
-            0,
-            0,
-            TOKENS_1
-        );
-        
-        assertEq(uint256(testStorage.netPosition(ENTRY_1)), TOKENS_1);
-        
-        // Remove position
-        testStorage.processRemoveSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            TOKENS_1,
-            TOKENS_1,
-            0,
-            0,
-            0
-        );
-        
-        assertEq(uint256(testStorage.netPosition(ENTRY_1)), 0);
-    }
-
-    function test_invariant_PositionSubsidy_AddRemove() public {
-        uint256 positionBonus = 10e18;
-        
-        // Add
-        testStorage.processAddSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            AMOUNT_1,
-            positionBonus,
-            0,
-            TOKENS_1
-        );
-        
-        assertEq(testStorage.primaryPositionSubsidy(ENTRY_1), positionBonus);
-        
-        // Remove
-        testStorage.processRemoveSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            TOKENS_1,
-            TOKENS_1,
-            positionBonus,
-            0,
-            0
-        );
-        
-        assertEq(testStorage.primaryPositionSubsidy(ENTRY_1), 0);
-    }
-
-    function test_invariant_DepositTracking_Proportional() public {
-        uint256 deposit = 200e18;
-        testStorage.processAddSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            deposit,
-            0,
-            0,
-            TOKENS_2 // 100e18
-        );
-        
-        // Remove 50%
-        uint256 refund = testStorage.processRemoveSecondaryPosition(
-            ENTRY_1,
-            participant1,
-            TOKENS_1, // 50e18
-            TOKENS_2,
-            0,
-            0,
-            0
-        );
-        
-        // Refund should be 50% of deposit
-        assertEq(refund, deposit / 2);
-        assertEq(testStorage.secondaryDepositedPerEntry(participant1, ENTRY_1), deposit / 2);
-    }
-
-    function test_invariant_ClaimPayout_Proportional() public {
-        testStorage.setSecondaryWinningEntry(ENTRY_1);
-        testStorage.setSecondaryPrizePool(1000e18);
-        testStorage.setSecondaryPrizePoolSubsidy(500e18);
-        testStorage.setNetPosition(ENTRY_1, int256(TOKENS_2)); // 100e18
-        
-        // Claim 50% of supply
-        (uint256 payout, , , ) = testStorage.processClaimSecondaryPayout(
-            ENTRY_1,
-            participant1,
-            TOKENS_1, // 50e18
-            2000e18
-        );
-        
-        // Should get 50% of total funds
-        assertEq(payout, 750e18); // 50% of 1500e18
-    }
-
-    function test_invariant_CrossSubsidy_Accumulation() public {
-        // Add multiple positions
-        for (uint256 i = 0; i < 5; i++) {
-            testStorage.processAddSecondaryPosition(
-                ENTRY_1,
-                participant1,
-                AMOUNT_1,
-                0,
-                5e18,
-                TOKENS_1
-            );
-        }
-        
-        // Should accumulate
-        assertEq(testStorage.secondaryToPrimarySubsidy(participant1, ENTRY_1), 25e18);
     }
 }

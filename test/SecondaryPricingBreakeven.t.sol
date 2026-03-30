@@ -66,9 +66,7 @@ contract BreakEvenAnalysis is Test {
             PRIMARY_DEPOSIT,
             500, // 5% oracle fee
             block.timestamp + 365 days,
-            500, // positionBonusShareBps: 5%
-            3000, // targetPrimaryShareBps: 30%
-            1500  // maxCrossSubsidyBps: 15%
+            500 // primaryEntryInvestmentShareBps: 5%
         );
         
         contest = ContestController(contestAddress);

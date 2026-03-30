@@ -21,13 +21,8 @@ import "solmate/tokens/ERC20.sol";
  * 
  * Contest Settings:
  * - Oracle fee: 5% (500 bps)
- * - Position bonus: 5% (500 bps) - goes to entry owner
- * - Target primary share: 30% (3000 bps)
- * - Max cross-subsidy: 15% (1500 bps)
- * 
- * These settings mean more collateral per deposit (better value for buyers) compared to
- * previous settings with higher position bonuses. The pricing algorithm (polynomial bonding
- * curve) remains unchanged, so qualitative behaviors are the same.
+ * - Primary entry investment: 5% (500 bps) — owner-first curve leg on each secondary buy
+ * - Isolated markets: no cross-subsidy between primary prize pool and secondary liquidity
  * 
  * Run with `forge test --match-path test/SecondaryPricingSimulation.t.sol -vv` to see console output
  * and manually review whether the pricing behavior feels fair and intuitive.
@@ -84,9 +79,7 @@ contract SecondaryContestPricingTest is Test {
             PRIMARY_DEPOSIT,
             500, // 5% oracle fee
             block.timestamp + 365 days,
-            500, // positionBonusShareBps: 5%
-            3000, // targetPrimaryShareBps: 30%
-            1500  // maxCrossSubsidyBps: 15%
+            500 // primaryEntryInvestmentShareBps: 5%
         );
         
         contest = ContestController(contestAddress);
