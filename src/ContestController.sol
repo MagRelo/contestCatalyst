@@ -99,7 +99,6 @@ contract ContestController is ERC1155, ReentrancyGuard {
     ) ERC1155() {
         require(_paymentToken != address(0), "Invalid payment token");
         require(_oracle != address(0), "Invalid oracle");
-        require(_primaryDepositAmount > 0, "Invalid deposit amount");
         require(_oracleFeeBps <= 1000, "Oracle fee too high");
         require(_expiryTimestamp > block.timestamp, "Expiry in past");
         require(_primaryEntryInvestmentShareBps <= BPS_DENOMINATOR, "Invalid primary entry investment share");

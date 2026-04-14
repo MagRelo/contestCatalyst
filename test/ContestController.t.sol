@@ -289,9 +289,8 @@ contract ContestControllerTest is Test {
         );
     }
     
-    function test_constructor_InvalidDepositAmount() public {
-        vm.expectRevert("Invalid deposit amount");
-        factory.createContest(
+    function test_constructor_ZeroDepositAmount_Succeeds() public {
+        address contestAddress = factory.createContest(
             address(paymentToken),
             oracle,
             0,
@@ -299,6 +298,36 @@ contract ContestControllerTest is Test {
             block.timestamp + EXPIRY_OFFSET,
             PRIMARY_ENTRY_INVESTMENT_SHARE_BPS
         );
+        ContestController freeContest = ContestController(contestAddress);
+        assertEq(freeContest.primaryDepositAmount(), 0);
+        assertEq(uint8(freeContest.state()), uint8(ContestState.OPEN));
+    }
+
+    /// @dev Free primary: add entry with no token transfer, activate, secondary still works
+    function test_zeroDepositContest_primaryAndSecondaryFlow() public {
+        address contestAddress = factory.createContest(
+            address(paymentToken),
+            oracle,
+            0,
+            ORACLE_FEE_BPS,
+            block.timestamp + EXPIRY_OFFSET,
+            PRIMARY_ENTRY_INVESTMENT_SHARE_BPS
+        );
+        ContestController freeContest = ContestController(contestAddress);
+        paymentToken.mint(user1, PURCHASE_INCREMENT);
+        vm.prank(user1);
+        paymentToken.approve(address(freeContest), PURCHASE_INCREMENT);
+
+        vm.prank(user1);
+        freeContest.addPrimaryPosition(ENTRY_1, new bytes32[](0));
+        assertEq(freeContest.primaryPrizePool(), 0);
+
+        vm.prank(oracle);
+        freeContest.activateContest();
+
+        vm.prank(user1);
+        freeContest.addSecondaryPosition(ENTRY_1, PURCHASE_INCREMENT, new bytes32[](0));
+        assertEq(freeContest.secondaryLiquidityPerEntry(ENTRY_1), PURCHASE_INCREMENT);
     }
     
     function test_constructor_OracleFeeTooHigh() public {
