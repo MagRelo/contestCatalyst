@@ -136,7 +136,7 @@ forge test --match-path test/SecondaryPricingSimulation.t.sol -vvv
 
 ### Simulation Test Results
 
-The following tables show real-world simulation results from test runs with **current settings** (5% oracle fee, 5% primary entry investment carve to the owner’s curve leg, isolated primary vs secondary liquidity). These demonstrate how the polynomial bonding curve behaves in practice.
+The following tables show real-world simulation results from test runs with **current settings** (5% oracle fee, 5% primary entry investment carve to the owner’s curve leg, no cross-subsidy between primary prize pool and secondary collateral). These demonstrate how the polynomial bonding curve behaves in practice.
 
 #### Scenario 1: Sequential Equal Purchases
 
@@ -271,7 +271,7 @@ When a secondary participant pays `amount` for an entry:
 
 1. **Primary entry investment**: `amount * primaryEntryInvestmentShareBps / 10000` is spent on the owner’s curve leg first (mints owner ERC1155).
 2. **Buyer leg**: The remainder is spent on the buyer’s curve leg (mints buyer ERC1155).
-3. **Liquidity**: The full `amount` is credited to that entry’s `secondaryLiquidityPerEntry[entryId]` (sole payment-token backing for open-phase sell-back and settlement on that entry).
+3. **Liquidity**: The full `amount` is credited to that entry’s `secondaryLiquidityPerEntry[entryId]` (payment-token backing for OPEN/CANCELLED sell-backs on that entry). At settlement, all entries’ balances are merged into the winning primary entry’s slot for pro-rata redemption by that entry’s ERC1155 holders.
 
 Oracle fees apply on settled secondary payout claims (`claimSecondaryPayout` / `pushSecondaryPayouts`), not at deposit time.
 
@@ -392,7 +392,7 @@ However, the implementation uses Simpson's rule for numerical integration, which
 ### Model
 
 - **Primary** deposits accrue only to `primaryPrizePool` (no cross-subsidy out).
-- **Secondary** uses per-entry liquidity plus the same polynomial curve for owner and buyer legs after the investment carve.
+- **Secondary** uses per-entry liquidity (until settlement merge) plus the same polynomial curve for owner and buyer legs after the investment carve.
 - **Historical note**: Older docs referred to position bonuses and pool cross-subsidies; those mechanisms are removed.
 
 ### Test Results

@@ -13,7 +13,7 @@ This analysis uses the following contest settings:
 | `BASE_PRICE`                       | 1e6   | Minimum price: 1.0 (scaled by PRICE_PRECISION)                                  |
 | `PRICE_PRECISION`                  | 1e6   | Price precision: 1.0 = 1,000,000                                              |
 
-Primary and secondary sides do not cross-subsidize. Secondary payment-token backing is per entry (`secondaryLiquidityPerEntry` in the controller), not a separate global secondary pool.
+Primary and secondary sides do not cross-subsidize during trading. Secondary payment-token backing is recorded per entry in `secondaryLiquidityPerEntry` (for pricing and OPEN/CANCELLED sell-backs). On settlement, every entry’s balance is merged into the winning primary entry’s slot so winning secondary holders redeem against the **full** secondary TVL (there is no separate global pool variable—only this merge step).
 
 ## Overview
 
@@ -25,7 +25,7 @@ This document analyzes when additional betting on a single entry becomes economi
 
 - **Initial Configuration:**
   - **5 primary entries created** ($25 per entry = $125 total deposited into `primaryPrizePool`)
-  - **Each primary entry buys $20 secondary on their own entry**; each payment stays in that entry’s secondary liquidity and bonding-curve supply
+  - **Each primary entry buys $20 secondary on their own entry**; each payment credits that entry’s `secondaryLiquidityPerEntry` and bonding-curve supply until settlement (then liquidity is merged to the winning entry for redemption, which is outside this single-entry break-even exercise)
   - **No cross-subsidy** between primary pool and secondary liquidity
   - **Entry 1 initial state:** 18.05 tokens, 20% ownership (equal bets on all 5 entries)
   - **Two bettors alternate $10 purchases** on Entry 1, competing for ownership

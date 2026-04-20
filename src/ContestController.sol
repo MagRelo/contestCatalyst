@@ -15,8 +15,11 @@ interface IERC20Balance {
 
 /**
  * @title ContestController
- * @dev Layer 1: primary prize pool only. Layer 2: per-entry bonding curve + secondaryLiquidityPerEntry.
- *      primaryEntryInvestmentShareBps of each secondary buy mints to entry owner first, then buyer.
+ * @dev Layer 1: primary prize pool only. Layer 2: per-entry bonding curve; each buy credits
+ *      `secondaryLiquidityPerEntry[entryId]` for OPEN/CANCELLED sell-back pricing.
+ *      On settlement, all per-entry secondary balances are merged into `secondaryLiquidityPerEntry[secondaryWinningEntry]`
+ *      so winning-entry ERC1155 holders redeem pro-rata against the full secondary TVL (or it spills to primary payouts
+ *      if there is no supply on the winning entry). primaryEntryInvestmentShareBps splits each buy into owner leg then buyer leg.
  */
 contract ContestController is ERC1155, ReentrancyGuard {
     address public immutable paymentToken;
@@ -50,7 +53,8 @@ contract ContestController is ERC1155, ReentrancyGuard {
     bytes32 public primaryMerkleRoot;
 
     mapping(uint256 => int256) public netPosition;
-    /// @notice Payment token backing this entry's secondary ERC1155 (buy adds; sell/settle removes pro-rata)
+    /// @notice Payment token backing this entry's secondary ERC1155 (buy adds; sell removes pro-rata while OPEN/CANCELLED)
+    /// @dev After SETTLE, all entries' balances are merged into the winning entry's slot for redemption accounting.
     mapping(uint256 => uint256) public secondaryLiquidityPerEntry;
 
     /// @notice Attributed invested principal per token holder per entry (used by frontend UI)
@@ -346,6 +350,14 @@ contract ContestController is ERC1155, ReentrancyGuard {
 
         secondaryWinningEntry = winningEntries[0];
         secondaryMarketResolved = true;
+
+        uint256 aggregatedSecondary;
+        for (uint256 j = 0; j < entries.length; j++) {
+            uint256 eid = entries[j];
+            aggregatedSecondary += secondaryLiquidityPerEntry[eid];
+            secondaryLiquidityPerEntry[eid] = 0;
+        }
+        secondaryLiquidityPerEntry[secondaryWinningEntry] = aggregatedSecondary;
 
         uint256 winnerSupply = uint256(netPosition[secondaryWinningEntry]);
         uint256 winnerLiq = secondaryLiquidityPerEntry[secondaryWinningEntry];

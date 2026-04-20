@@ -60,9 +60,8 @@ contest.addPrimaryPosition(entryId, merkleProof);
 // Remove position during OPEN phase (full refund)
 contest.removePrimaryPosition(entryId);
 
-// After settlement: claim Layer-1 prize and position bonus separately (each net of oracle fee)
+// After settlement: claim Layer-1 prize (net of oracle fee)
 contest.claimPrimaryPayout(entryId);
-contest.claimPositionBonus(entryId);
 ```
 
 ### Secondary Participants
@@ -74,7 +73,10 @@ contest.addSecondaryPosition(entryId, amount, merkleProof);
 // Remove position during OPEN phase only (full refund)
 contest.removeSecondaryPosition(entryId, tokenAmount);
 
-// Claim payout after settlement (winner-take-all)
+// Claim payout after settlement (winner-take-all on the oracle’s first winning primary entry):
+// all secondary payment-token backing across entries is merged to that entry at settlement, then
+// redeemed pro-rata by ERC1155 holders of that entry (net of oracle fee). If no supply exists on
+// that entry, merged secondary TVL is added to primary payout allocations instead.
 contest.claimSecondaryPayout(entryId);
 ```
 
@@ -88,7 +90,6 @@ contest.settleContest(winningEntries, payoutBps);  // LOCKED → SETTLED
 
 // Optional: Push payouts for efficiency
 contest.pushPrimaryPayouts(entryIds);
-contest.pushPositionBonuses(entryIds);
 contest.pushSecondaryPayouts(participantAddresses, entryId);
 
 // Other oracle functions

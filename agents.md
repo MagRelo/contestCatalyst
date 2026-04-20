@@ -45,7 +45,7 @@ The standard initial contract settings are defined in:
    - `oracleFeeBps = 500` (5%)
    - `primaryEntryInvestmentShareBps = 500` (5%) — owner-first curve leg on each secondary buy
    - `PURCHASE_INCREMENT = 10e18` ($10)
-   - No cross-subsidy parameters; primary prize pool and per-entry secondary liquidity are isolated
+   - No cross-subsidy parameters; the primary prize pool does not subsidize secondary (and vice versa). Secondary collateral is tracked per entry for OPEN/CANCELLED sell-backs; at settlement it is merged onto the winning primary entry for pro-rata redemption (or spilled into primary payouts if there is no winning secondary supply).
 
 2. **`SecondaryPricingBreakeven.md`** - See the "Contest Configuration" section:
    - `PRIMARY_DEPOSIT`: $25

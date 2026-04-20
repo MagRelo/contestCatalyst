@@ -996,11 +996,22 @@ contract ContestControllerTest is Test {
         
         uint256 balanceBefore = paymentToken.balanceOf(user3);
         
+        uint256 secondaryTvlBeforeSettle = contest.getSecondarySideBalance();
+
         vm.prank(user3);
         contest.claimSecondaryPayout(ENTRY_1);
-        
+
+        // Entry owner also holds winning-entry secondary tokens (owner curve leg)
+        if (contest.balanceOf(user1, ENTRY_1) > 0) {
+            vm.prank(user1);
+            contest.claimSecondaryPayout(ENTRY_1);
+        }
+
         assertEq(contest.balanceOf(user3, ENTRY_1), 0);
         assertGt(paymentToken.balanceOf(user3), balanceBefore);
+        assertEq(contest.totalSecondaryLiquidity(), 0);
+        assertEq(contest.getSecondarySideBalance(), 0);
+        assertEq(secondaryTvlBeforeSettle, PURCHASE_INCREMENT * 10 + PURCHASE_INCREMENT * 5);
     }
 
     function test_secondaryDepositedPerEntry_claimResetsToZero() public {
@@ -1113,16 +1124,70 @@ contract ContestControllerTest is Test {
         vm.prank(oracle);
         contest.settleContest(winners, payouts);
         
+        uint256 secondaryTvlBeforeSettle = contest.getSecondarySideBalance();
+
         vm.prank(user3);
         contest.claimSecondaryPayout(ENTRY_1);
-        
+
         uint256 user3Payout = paymentToken.balanceOf(user3);
         assertGt(user3Payout, 0);
-        
+
         uint256 bal4Before = paymentToken.balanceOf(user4);
         vm.prank(user4);
         contest.claimSecondaryPayout(ENTRY_1);
         assertGt(paymentToken.balanceOf(user4), bal4Before);
+
+        if (contest.balanceOf(user1, ENTRY_1) > 0) {
+            vm.prank(user1);
+            contest.claimSecondaryPayout(ENTRY_1);
+        }
+
+        assertEq(contest.totalSecondaryLiquidity(), 0);
+        assertEq(contest.getSecondarySideBalance(), 0);
+        assertEq(secondaryTvlBeforeSettle, PURCHASE_INCREMENT * 25);
+    }
+
+    /// @dev Losing-entry secondary TVL is merged to the winning entry at settlement and is claimable only by winning-entry token holders
+    function test_claimSecondaryPayout_losingEntryLiquidityMergedToWinners() public {
+        _createPrimaryEntry(user1, ENTRY_1);
+        _createPrimaryEntry(user2, ENTRY_2);
+        _createSecondaryPosition(user3, ENTRY_1, PURCHASE_INCREMENT * 2);
+        _createSecondaryPosition(user4, ENTRY_2, PURCHASE_INCREMENT * 3);
+
+        vm.prank(oracle);
+        contest.activateContest();
+        vm.prank(oracle);
+        contest.lockContest();
+
+        uint256 tvlBefore = contest.getSecondarySideBalance();
+        assertEq(tvlBefore, PURCHASE_INCREMENT * 5);
+
+        uint256[] memory winners = new uint256[](1);
+        winners[0] = ENTRY_1;
+        uint256[] memory payouts = new uint256[](1);
+        payouts[0] = 10000;
+
+        vm.prank(oracle);
+        contest.settleContest(winners, payouts);
+
+        assertEq(contest.secondaryLiquidityPerEntry(ENTRY_2), 0);
+        assertEq(contest.getSecondarySideBalance(), tvlBefore);
+        assertEq(contest.secondaryLiquidityPerEntry(ENTRY_1), tvlBefore);
+
+        uint256 u3Before = paymentToken.balanceOf(user3);
+        vm.prank(user3);
+        contest.claimSecondaryPayout(ENTRY_1);
+
+        if (contest.balanceOf(user1, ENTRY_1) > 0) {
+            vm.prank(user1);
+            contest.claimSecondaryPayout(ENTRY_1);
+        }
+
+        assertEq(contest.totalSecondaryLiquidity(), 0);
+        assertGt(paymentToken.balanceOf(user3), u3Before);
+        vm.prank(user4);
+        vm.expectRevert("Not winning entry");
+        contest.claimSecondaryPayout(ENTRY_2);
     }
     
     // ============ Oracle Functions Tests ============
@@ -1277,16 +1342,17 @@ contract ContestControllerTest is Test {
         uint256[] memory payouts = new uint256[](1);
         payouts[0] = 10000;
         
-        uint256 payoutBefore = contest.primaryPrizePoolPayouts(ENTRY_1);
+        uint256 primaryPoolBefore = contest.primaryPrizePool();
         uint256 secondaryTvlBefore = contest.getSecondarySideBalance();
-        
+        assertEq(secondaryTvlBefore, PURCHASE_INCREMENT);
+
         vm.prank(oracle);
         contest.settleContest(winners, payouts);
-        
-        // Winning entry has no secondary supply; loser entry keeps its per-entry liquidity (isolated markets)
-        uint256 payoutAfter = contest.primaryPrizePoolPayouts(ENTRY_1);
-        assertGt(payoutAfter, payoutBefore);
-        assertEq(contest.getSecondarySideBalance(), secondaryTvlBefore);
+
+        // All secondary TVL is merged to the winning entry; with no winning secondary supply it spills to primary payouts
+        assertEq(contest.primaryPrizePoolPayouts(ENTRY_1), primaryPoolBefore + PURCHASE_INCREMENT);
+        assertEq(contest.getSecondarySideBalance(), 0);
+        assertEq(contest.secondaryLiquidityPerEntry(ENTRY_2), 0);
     }
     
     function test_settleContest_WrongState() public {
