@@ -15,8 +15,10 @@ interface IERC20Balance {
 
 /**
  * @title ContestController
- * @dev Layer 1: primary prize pool only. Layer 2: per-entry bonding curve; each buy credits
- *      `secondaryLiquidityPerEntry[entryId]` for OPEN/CANCELLED sell-back pricing.
+ * @dev Layer 1: primary prize pool (deposit minus optional subsidy carve). Layer 2: per-entry bonding
+ *      curve; each buy credits `secondaryLiquidityPerEntry[entryId]` (backed) for OPEN/CANCELLED
+ *      sell-back pricing. Primary carve credits `secondaryPrimarySubsidyPerEntry[entryId]` (unbacked);
+ *      sell-backs use backed liquidity only.
  *      On settlement, all per-entry secondary balances are merged into `secondaryLiquidityPerEntry[secondaryWinningEntry]`
  *      so winning-entry ERC1155 holders redeem pro-rata against the full secondary TVL (or it spills to primary payouts
  *      if there is no supply on the winning entry). Each secondary buy credits liquidity and mints ERC1155 to the caller per the bonding curve from the entry's current nonnegative supply.
@@ -27,6 +29,8 @@ contract ContestController is ERC1155, ReentrancyGuard {
     uint256 public immutable primaryDepositAmount;
     uint256 public immutable oracleFeeBps;
     uint256 public immutable expiryTimestamp;
+    /// @notice BPS of each primary deposit credited to `secondaryPrimarySubsidyPerEntry` (no ERC1155 mint)
+    uint256 public immutable primaryDepositSecondarySubsidyBps;
 
     uint256 public constant BPS_DENOMINATOR = 10000;
     uint256 public constant PRICE_PRECISION = 1e6;
@@ -52,9 +56,12 @@ contract ContestController is ERC1155, ReentrancyGuard {
     bytes32 public primaryMerkleRoot;
 
     mapping(uint256 => int256) public netPosition;
-    /// @notice Payment token backing this entry's secondary ERC1155 (buy adds; sell removes pro-rata while OPEN/CANCELLED)
-    /// @dev After SETTLE, all entries' balances are merged into the winning entry's slot for redemption accounting.
+    /// @notice Payment token backing this entry's secondary ERC1155 (secondary buy/sell only; sell-backs are pro-rata on this bucket while OPEN/CANCELLED)
+    /// @dev After SETTLE, per-entry backed + subsidy are merged into the winning entry's slot for redemption accounting.
     mapping(uint256 => uint256) public secondaryLiquidityPerEntry;
+
+    /// @notice Primary-sourced secondary TVL on this entry (no share backing; not used for OPEN/CANCELLED sell-backs)
+    mapping(uint256 => uint256) public secondaryPrimarySubsidyPerEntry;
 
     /// @notice Attributed invested principal per token holder per entry (used by frontend UI)
     /// @dev Updated on secondary buys and reduced pro-rata on sells; not used for pricing.
@@ -95,18 +102,21 @@ contract ContestController is ERC1155, ReentrancyGuard {
         address _oracle,
         uint256 _primaryDepositAmount,
         uint256 _oracleFeeBps,
-        uint256 _expiryTimestamp
+        uint256 _expiryTimestamp,
+        uint256 _primaryDepositSecondarySubsidyBps
     ) ERC1155() {
         require(_paymentToken != address(0), "Invalid payment token");
         require(_oracle != address(0), "Invalid oracle");
         require(_oracleFeeBps <= 1000, "Oracle fee too high");
         require(_expiryTimestamp > block.timestamp, "Expiry in past");
+        require(_primaryDepositSecondarySubsidyBps <= BPS_DENOMINATOR, "Subsidy bps too high");
 
         paymentToken = _paymentToken;
         oracle = _oracle;
         primaryDepositAmount = _primaryDepositAmount;
         oracleFeeBps = _oracleFeeBps;
         expiryTimestamp = _expiryTimestamp;
+        primaryDepositSecondarySubsidyBps = _primaryDepositSecondarySubsidyBps;
 
         state = ContestState.OPEN;
     }
@@ -119,7 +129,11 @@ contract ContestController is ERC1155, ReentrancyGuard {
         PrimaryContest.processAddPrimaryPosition(entries, entryOwner, entryId, msg.sender, primaryDepositAmount);
         entryIndexPlusOne[entryId] = entries.length;
 
-        primaryPrizePool += primaryDepositAmount;
+        (uint256 toPrimaryPool, uint256 subsidy) = _splitPrimaryDeposit(primaryDepositAmount);
+        primaryPrizePool += toPrimaryPool;
+        if (subsidy > 0) {
+            secondaryPrimarySubsidyPerEntry[entryId] += subsidy;
+        }
 
         SafeTransferLib.safeTransferFrom(ERC20(paymentToken), msg.sender, address(this), primaryDepositAmount);
     }
@@ -127,11 +141,13 @@ contract ContestController is ERC1155, ReentrancyGuard {
     function removePrimaryPosition(uint256 entryId) external nonReentrant {
         PrimaryContest.validateRemovePrimaryPosition(entryOwner, entryId, msg.sender, uint8(state));
 
-        (uint256 refundAmount, uint256 primaryContribution) =
-            PrimaryContest.processRemovePrimaryPosition(entryOwner, entryId, primaryDepositAmount);
+        (uint256 refundAmount,) = PrimaryContest.processRemovePrimaryPosition(entryOwner, entryId, primaryDepositAmount);
         _removeActiveEntry(entryId);
 
-        primaryPrizePool -= primaryContribution;
+        (uint256 toPrimaryPool, uint256 subsidyPortion) = _splitPrimaryDeposit(primaryDepositAmount);
+        primaryPrizePool -= toPrimaryPool;
+        require(secondaryPrimarySubsidyPerEntry[entryId] >= subsidyPortion, "Subsidy underflow");
+        secondaryPrimarySubsidyPerEntry[entryId] -= subsidyPortion;
 
         SafeTransferLib.safeTransfer(ERC20(paymentToken), msg.sender, refundAmount);
     }
@@ -325,8 +341,9 @@ contract ContestController is ERC1155, ReentrancyGuard {
         uint256 aggregatedSecondary;
         for (uint256 j = 0; j < entries.length; j++) {
             uint256 eid = entries[j];
-            aggregatedSecondary += secondaryLiquidityPerEntry[eid];
+            aggregatedSecondary += secondaryLiquidityPerEntry[eid] + secondaryPrimarySubsidyPerEntry[eid];
             secondaryLiquidityPerEntry[eid] = 0;
+            secondaryPrimarySubsidyPerEntry[eid] = 0;
         }
         secondaryLiquidityPerEntry[secondaryWinningEntry] = aggregatedSecondary;
 
@@ -366,7 +383,9 @@ contract ContestController is ERC1155, ReentrancyGuard {
             primaryPrizePool = 0;
             accumulatedOracleFee = 0;
             for (uint256 i = 0; i < entries.length; i++) {
-                secondaryLiquidityPerEntry[entries[i]] = 0;
+                uint256 eid = entries[i];
+                secondaryLiquidityPerEntry[eid] = 0;
+                secondaryPrimarySubsidyPerEntry[eid] = 0;
             }
 
             state = ContestState.CLOSED;
@@ -403,6 +422,13 @@ contract ContestController is ERC1155, ReentrancyGuard {
 
     function _calculateOracleFee(uint256 amount) internal view returns (uint256 fee) {
         fee = (amount * oracleFeeBps) / BPS_DENOMINATOR;
+    }
+
+    /// @return toPrimaryPool Portion of `deposit` credited to `primaryPrizePool` on add (reversed on remove)
+    /// @return subsidy Portion credited to `secondaryPrimarySubsidyPerEntry[entryId]` on add
+    function _splitPrimaryDeposit(uint256 deposit) internal view returns (uint256 toPrimaryPool, uint256 subsidy) {
+        subsidy = (deposit * primaryDepositSecondarySubsidyBps) / BPS_DENOMINATOR;
+        toPrimaryPool = deposit - subsidy;
     }
 
     function pushPrimaryPayouts(uint256[] calldata entryIds) external onlyOracle nonReentrant {
@@ -511,10 +537,11 @@ contract ContestController is ERC1155, ReentrancyGuard {
         entryIndexPlusOne[entryId] = 0;
     }
 
-    /// @notice Sum of secondaryLiquidityPerEntry over all primary entries
+    /// @notice Sum of backed (`secondaryLiquidityPerEntry`) plus primary subsidy per active entry
     function totalSecondaryLiquidity() public view returns (uint256 sum) {
         for (uint256 i = 0; i < entries.length; i++) {
-            sum += secondaryLiquidityPerEntry[entries[i]];
+            uint256 eid = entries[i];
+            sum += secondaryLiquidityPerEntry[eid] + secondaryPrimarySubsidyPerEntry[eid];
         }
     }
 

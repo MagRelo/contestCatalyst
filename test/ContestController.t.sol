@@ -20,16 +20,26 @@ import "solady/utils/MerkleProofLib.sol";
  * - Fuzzing: Property-based tests for edge cases
  * - Invariants: System-wide properties that must always hold
  * 
- * All tests respect standard settings from agents.md:
+ * All tests respect standard settings from AGENTS.md:
  * - PRIMARY_DEPOSIT = 25e18 ($25)
  * - ORACLE_FEE_BPS = 500 (5%)
  * - PURCHASE_INCREMENT = 10e18 ($10)
+ * - PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS = 700 (7% of each primary deposit to per-entry subsidy)
  */
 contract ContestControllerTest is Test {
     // Standard settings from agents.md
     uint256 public constant PRIMARY_DEPOSIT = 25e18; // $25
     uint256 public constant PURCHASE_INCREMENT = 10e18; // $10
     uint256 public constant ORACLE_FEE_BPS = 500; // 5%
+    uint256 public constant PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS = 700; // 7%
+
+    function _standardSubsidyPerPrimaryDeposit() internal pure returns (uint256) {
+        return (PRIMARY_DEPOSIT * PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS) / 10_000;
+    }
+
+    function _standardPrimaryPortionPerDeposit() internal pure returns (uint256) {
+        return PRIMARY_DEPOSIT - _standardSubsidyPerPrimaryDeposit();
+    }
     
     // Contest state enum (matches ContestController)
     enum ContestState {
@@ -77,7 +87,8 @@ contract ContestControllerTest is Test {
             oracle,
             PRIMARY_DEPOSIT,
             ORACLE_FEE_BPS,
-            block.timestamp + EXPIRY_OFFSET
+            block.timestamp + EXPIRY_OFFSET,
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
         );
         
         contest = ContestController(contestAddress);
@@ -106,7 +117,20 @@ contract ContestControllerTest is Test {
             _oracle,
             PRIMARY_DEPOSIT,
             ORACLE_FEE_BPS,
-            block.timestamp + _expiryOffset
+            block.timestamp + _expiryOffset,
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
+        );
+        return ContestController(contestAddress);
+    }
+
+    function _deployContestSubsidy(uint256 subsidyBps) internal returns (ContestController) {
+        address contestAddress = factory.createContest(
+            address(paymentToken),
+            oracle,
+            PRIMARY_DEPOSIT,
+            ORACLE_FEE_BPS,
+            block.timestamp + EXPIRY_OFFSET,
+            subsidyBps
         );
         return ContestController(contestAddress);
     }
@@ -118,6 +142,12 @@ contract ContestControllerTest is Test {
         paymentToken.mint(user, amount);
         vm.prank(user);
         paymentToken.approve(address(contest), amount);
+    }
+
+    function _fundUserContest(address user, ContestController ctr, uint256 amount) internal {
+        paymentToken.mint(user, amount);
+        vm.prank(user);
+        paymentToken.approve(address(ctr), amount);
     }
     
     /**
@@ -257,6 +287,7 @@ contract ContestControllerTest is Test {
         assertEq(newContest.oracle(), oracle);
         assertEq(newContest.primaryDepositAmount(), PRIMARY_DEPOSIT);
         assertEq(newContest.oracleFeeBps(), ORACLE_FEE_BPS);
+        assertEq(newContest.primaryDepositSecondarySubsidyBps(), PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS);
         assertEq(uint8(newContest.state()), uint8(ContestState.OPEN));
     }
     
@@ -267,7 +298,8 @@ contract ContestControllerTest is Test {
             oracle,
             PRIMARY_DEPOSIT,
             ORACLE_FEE_BPS,
-            block.timestamp + EXPIRY_OFFSET
+            block.timestamp + EXPIRY_OFFSET,
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
         );
     }
     
@@ -278,7 +310,8 @@ contract ContestControllerTest is Test {
             address(0),
             PRIMARY_DEPOSIT,
             ORACLE_FEE_BPS,
-            block.timestamp + EXPIRY_OFFSET
+            block.timestamp + EXPIRY_OFFSET,
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
         );
     }
     
@@ -288,7 +321,8 @@ contract ContestControllerTest is Test {
             oracle,
             0,
             ORACLE_FEE_BPS,
-            block.timestamp + EXPIRY_OFFSET
+            block.timestamp + EXPIRY_OFFSET,
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
         );
         ContestController freeContest = ContestController(contestAddress);
         assertEq(freeContest.primaryDepositAmount(), 0);
@@ -302,7 +336,8 @@ contract ContestControllerTest is Test {
             oracle,
             0,
             ORACLE_FEE_BPS,
-            block.timestamp + EXPIRY_OFFSET
+            block.timestamp + EXPIRY_OFFSET,
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
         );
         ContestController freeContest = ContestController(contestAddress);
         paymentToken.mint(user1, PURCHASE_INCREMENT);
@@ -328,7 +363,8 @@ contract ContestControllerTest is Test {
             oracle,
             PRIMARY_DEPOSIT,
             1001, // > 10%
-            block.timestamp + EXPIRY_OFFSET
+            block.timestamp + EXPIRY_OFFSET,
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
         );
     }
     
@@ -339,8 +375,100 @@ contract ContestControllerTest is Test {
             oracle,
             PRIMARY_DEPOSIT,
             ORACLE_FEE_BPS,
-            block.timestamp - 1
+            block.timestamp - 1,
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
         );
+    }
+
+    function test_constructor_SubsidyBpsTooHigh() public {
+        vm.expectRevert("Subsidy bps too high");
+        factory.createContest(
+            address(paymentToken),
+            oracle,
+            PRIMARY_DEPOSIT,
+            ORACLE_FEE_BPS,
+            block.timestamp + EXPIRY_OFFSET,
+            10_001
+        );
+    }
+
+    function test_constructor_SubsidyBpsMax_succeeds() public {
+        ContestController c = _deployContestSubsidy(10_000);
+        assertEq(c.primaryDepositSecondarySubsidyBps(), 10_000);
+    }
+
+    function test_subsidy_addPrimary_splitsPoolAndSubsidy() public {
+        ContestController c = _deployContestSubsidy(2000);
+        uint256 subsidy = (PRIMARY_DEPOSIT * 2000) / 10_000;
+        _fundUserContest(user1, c, PRIMARY_DEPOSIT);
+        vm.prank(user1);
+        c.addPrimaryPosition(ENTRY_1, new bytes32[](0));
+        assertEq(c.primaryPrizePool(), PRIMARY_DEPOSIT - subsidy);
+        assertEq(c.secondaryPrimarySubsidyPerEntry(ENTRY_1), subsidy);
+        assertEq(c.getSecondarySideBalance(), subsidy);
+    }
+
+    function test_subsidy_removePrimary_restoresSubsidy() public {
+        ContestController c = _deployContestSubsidy(2000);
+        uint256 subsidy = (PRIMARY_DEPOSIT * 2000) / 10_000;
+        _fundUserContest(user1, c, PRIMARY_DEPOSIT);
+        vm.prank(user1);
+        c.addPrimaryPosition(ENTRY_1, new bytes32[](0));
+        assertEq(c.secondaryPrimarySubsidyPerEntry(ENTRY_1), subsidy);
+
+        uint256 balBefore = paymentToken.balanceOf(user1);
+        vm.prank(user1);
+        c.removePrimaryPosition(ENTRY_1);
+        assertEq(paymentToken.balanceOf(user1), balBefore + PRIMARY_DEPOSIT);
+        assertEq(c.secondaryPrimarySubsidyPerEntry(ENTRY_1), 0);
+        assertEq(c.primaryPrizePool(), 0);
+    }
+
+    function test_subsidy_sellbackUsesBackedOnly() public {
+        ContestController c = _deployContestSubsidy(2000);
+        uint256 subsidy = (PRIMARY_DEPOSIT * 2000) / 10_000;
+        _fundUserContest(user1, c, PRIMARY_DEPOSIT);
+        vm.prank(user1);
+        c.addPrimaryPosition(ENTRY_1, new bytes32[](0));
+
+        _fundUserContest(user2, c, PURCHASE_INCREMENT);
+        vm.prank(user2);
+        c.addSecondaryPosition(ENTRY_1, PURCHASE_INCREMENT, new bytes32[](0));
+        uint256 bal = c.balanceOf(user2, ENTRY_1);
+
+        vm.prank(user2);
+        c.removeSecondaryPosition(ENTRY_1, bal);
+
+        assertEq(c.secondaryLiquidityPerEntry(ENTRY_1), 0);
+        assertEq(c.secondaryPrimarySubsidyPerEntry(ENTRY_1), subsidy);
+    }
+
+    function test_subsidy_settlement_mergesSubsidyIntoWinnerLiquidity() public {
+        ContestController c = _deployContestSubsidy(2000);
+        _fundUserContest(user1, c, PRIMARY_DEPOSIT);
+        vm.prank(user1);
+        c.addPrimaryPosition(ENTRY_1, new bytes32[](0));
+
+        _fundUserContest(user2, c, PURCHASE_INCREMENT);
+        vm.prank(user2);
+        c.addSecondaryPosition(ENTRY_1, PURCHASE_INCREMENT, new bytes32[](0));
+
+        vm.prank(oracle);
+        c.activateContest();
+        vm.prank(oracle);
+        c.lockContest();
+
+        uint256[] memory winners = new uint256[](1);
+        winners[0] = ENTRY_1;
+        uint256[] memory payoutBps = new uint256[](1);
+        payoutBps[0] = 10_000;
+
+        vm.prank(oracle);
+        c.settleContest(winners, payoutBps);
+
+        uint256 gross = PURCHASE_INCREMENT + (PRIMARY_DEPOSIT * 2000) / 10_000;
+        assertEq(c.secondaryLiquidityPerEntry(ENTRY_1), gross);
+        assertEq(c.secondaryPrimarySubsidyPerEntry(ENTRY_1), 0);
     }
     
     // ============ Primary Position Tests ============
@@ -978,7 +1106,10 @@ contract ContestControllerTest is Test {
         assertGt(paymentToken.balanceOf(user3), balanceBefore);
         assertEq(contest.totalSecondaryLiquidity(), 0);
         assertEq(contest.getSecondarySideBalance(), 0);
-        assertEq(secondaryTvlBeforeSettle, PURCHASE_INCREMENT * 10 + PURCHASE_INCREMENT * 5);
+        assertEq(
+            secondaryTvlBeforeSettle,
+            PURCHASE_INCREMENT * 10 + PURCHASE_INCREMENT * 5 + 2 * _standardSubsidyPerPrimaryDeposit()
+        );
     }
 
     function test_secondaryDepositedPerEntry_claimResetsToZero() public {
@@ -1103,7 +1234,10 @@ contract ContestControllerTest is Test {
 
         assertEq(contest.totalSecondaryLiquidity(), 0);
         assertEq(contest.getSecondarySideBalance(), 0);
-        assertEq(secondaryTvlBeforeSettle, PURCHASE_INCREMENT * 25);
+        assertEq(
+            secondaryTvlBeforeSettle,
+            PURCHASE_INCREMENT * 25 + 2 * _standardSubsidyPerPrimaryDeposit()
+        );
     }
 
     /// @dev Losing-entry secondary TVL is merged to the winning entry at settlement and is claimable only by winning-entry token holders
@@ -1119,7 +1253,7 @@ contract ContestControllerTest is Test {
         contest.lockContest();
 
         uint256 tvlBefore = contest.getSecondarySideBalance();
-        assertEq(tvlBefore, PURCHASE_INCREMENT * 5);
+        assertEq(tvlBefore, PURCHASE_INCREMENT * 5 + 2 * _standardSubsidyPerPrimaryDeposit());
 
         uint256[] memory winners = new uint256[](1);
         winners[0] = ENTRY_1;
@@ -1298,13 +1432,14 @@ contract ContestControllerTest is Test {
         
         uint256 primaryPoolBefore = contest.primaryPrizePool();
         uint256 secondaryTvlBefore = contest.getSecondarySideBalance();
-        assertEq(secondaryTvlBefore, PURCHASE_INCREMENT);
+        uint256 twoSubsidy = 2 * _standardSubsidyPerPrimaryDeposit();
+        assertEq(secondaryTvlBefore, PURCHASE_INCREMENT + twoSubsidy);
 
         vm.prank(oracle);
         contest.settleContest(winners, payouts);
 
         // All secondary TVL is merged to the winning entry; with no winning secondary supply it spills to primary payouts
-        assertEq(contest.primaryPrizePoolPayouts(ENTRY_1), primaryPoolBefore + PURCHASE_INCREMENT);
+        assertEq(contest.primaryPrizePoolPayouts(ENTRY_1), primaryPoolBefore + PURCHASE_INCREMENT + twoSubsidy);
         assertEq(contest.getSecondarySideBalance(), 0);
         assertEq(contest.secondaryLiquidityPerEntry(ENTRY_2), 0);
     }
@@ -1912,9 +2047,11 @@ contract ContestControllerTest is Test {
     function test_isolatedMarkets_PrimaryDoesNotChangeSecondaryTvl() public {
         _createPrimaryEntry(user1, ENTRY_1);
         _createSecondaryPosition(user2, ENTRY_1, PURCHASE_INCREMENT);
-        uint256 secBefore = contest.getSecondarySideBalance();
+        uint256 e1BackedBefore = contest.secondaryLiquidityPerEntry(ENTRY_1);
+        uint256 e1SubBefore = contest.secondaryPrimarySubsidyPerEntry(ENTRY_1);
         _createPrimaryEntry(user3, ENTRY_2);
-        assertEq(contest.getSecondarySideBalance(), secBefore);
+        assertEq(contest.secondaryLiquidityPerEntry(ENTRY_1), e1BackedBefore);
+        assertEq(contest.secondaryPrimarySubsidyPerEntry(ENTRY_1), e1SubBefore);
     }
     
     // ============ State Transition Tests ============
@@ -2085,7 +2222,7 @@ contract ContestControllerTest is Test {
     function test_invariant_NoDoubleSpending() public {
         _createPrimaryEntry(user1, ENTRY_1);
         uint256 primaryPool = contest.primaryPrizePool();
-        assertEq(primaryPool, PRIMARY_DEPOSIT);
+        assertEq(primaryPool, _standardPrimaryPortionPerDeposit());
     }
     
     function test_invariant_OracleFeeBounded() public {

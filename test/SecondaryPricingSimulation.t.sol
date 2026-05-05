@@ -21,8 +21,9 @@ import "solmate/tokens/ERC20.sol";
  * 
  * Contest Settings:
  * - Oracle fee: 5% (500 bps)
+ * - primaryDepositSecondarySubsidyBps: 700 (7% of each primary deposit to per-entry subsidy; 93% to primary prize pool)
  * - Secondary purchases mint ERC1155 to the caller from the current curve supply
- * - Primary prize pool and secondary per-entry liquidity are accounted separately until settlement
+ * - Primary prize pool, primary subsidy, and secondary backed liquidity are accounted separately until settlement merge
  * 
  * Run with `forge test --match-path test/SecondaryPricingSimulation.t.sol -vv` to see console output
  * and manually review whether the pricing behavior feels fair and intuitive.
@@ -54,7 +55,8 @@ contract SecondaryContestPricingTest is Test {
     address public user5 = address(0x50);
     address public whale = address(0x100);
     
-    uint256 public constant PRIMARY_DEPOSIT = 25e18; // $25 (recommended for typical contests)
+    uint256 public constant PRIMARY_DEPOSIT = 25e18; // $25
+    uint256 public constant PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS = 700; // 7% (recommended for typical contests)
     
     struct PurchaseResult {
         uint256 amountSpent;
@@ -78,7 +80,8 @@ contract SecondaryContestPricingTest is Test {
             oracle,
             PRIMARY_DEPOSIT,
             500, // 5% oracle fee
-            block.timestamp + 365 days
+            block.timestamp + 365 days,
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
         );
         
         contest = ContestController(contestAddress);

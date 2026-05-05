@@ -15,6 +15,7 @@ contract ContestLifecycleE2E is Test {
     uint256 public constant PRIMARY_DEPOSIT = 25e18;
     uint256 public constant PURCHASE_INCREMENT = 10e18;
     uint256 public constant ORACLE_FEE_BPS = 500;
+    uint256 public constant PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS = 700;
     uint256 public constant ENTRY_1 = 1;
     uint256 public constant ENTRY_2 = 2;
     uint256 public constant EXPIRY_OFFSET = 365 days;
@@ -37,7 +38,8 @@ contract ContestLifecycleE2E is Test {
             oracle,
             PRIMARY_DEPOSIT,
             ORACLE_FEE_BPS,
-            block.timestamp + EXPIRY_OFFSET
+            block.timestamp + EXPIRY_OFFSET,
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
         );
         contest = ContestController(c);
         paymentToken.mint(u1, 1_000_000e18);
@@ -93,7 +95,8 @@ contract ContestLifecycleE2E is Test {
         vm.prank(oracle);
         contest.settleContest(winners, payouts);
 
-        assertEq(contest.getSecondarySideBalance(), PURCHASE_INCREMENT * 5);
+        uint256 twoSubsidy = 2 * ((PRIMARY_DEPOSIT * PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS) / 10_000);
+        assertEq(contest.getSecondarySideBalance(), PURCHASE_INCREMENT * 5 + twoSubsidy);
 
         vm.prank(u1);
         contest.claimPrimaryPayout(ENTRY_1);
@@ -145,7 +148,8 @@ contract ContestLifecycleE2E is Test {
             oracle,
             PRIMARY_DEPOSIT,
             ORACLE_FEE_BPS,
-            block.timestamp + EXPIRY_OFFSET
+            block.timestamp + EXPIRY_OFFSET,
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
         );
         ContestController cPush = ContestController(cPushAddr);
         _primary(cPush, pushUser, ENTRY_1);
@@ -245,11 +249,12 @@ contract ContestLifecycleE2E is Test {
         payouts[0] = 10_000;
 
         uint256 primaryPool = contest.primaryPrizePool();
+        uint256 twoSubsidy = 2 * ((PRIMARY_DEPOSIT * PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS) / 10_000);
         vm.prank(oracle);
         contest.settleContest(winners, payouts);
 
         assertEq(contest.getSecondarySideBalance(), 0);
-        assertEq(contest.primaryPrizePoolPayouts(ENTRY_1), primaryPool + PURCHASE_INCREMENT);
+        assertEq(contest.primaryPrizePoolPayouts(ENTRY_1), primaryPool + PURCHASE_INCREMENT + twoSubsidy);
 
         uint256 before = paymentToken.balanceOf(u1);
         vm.prank(u1);

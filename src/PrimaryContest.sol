@@ -65,7 +65,7 @@ library PrimaryContest {
     }
 
     /**
-     * @notice Full primary deposit is credited to the primary prize pool
+     * @notice Registers the entry; primary vs subsidy split is applied in ContestController
      */
     function processAddPrimaryPosition(
         uint256[] storage entries,

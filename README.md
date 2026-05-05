@@ -108,7 +108,7 @@ uint256 price = contest.calculateSecondaryPrice(entryId);
 
 // Balances
 uint256 primaryBalance = contest.getPrimarySideBalance();
-uint256 secondaryBalance = contest.getSecondarySideBalance(); // equals totalSecondaryLiquidity()
+uint256 secondaryBalance = contest.getSecondarySideBalance(); // backed + primary subsidy per entry (see contract)
 
 // Entry enumeration
 uint256 count = contest.getEntriesCount();
@@ -134,11 +134,12 @@ Use the factory to create a new contest:
 
 ```solidity
 address contest = factory.createContest(
-    paymentToken,            // ERC20 token address (e.g., CUT)
-    oracle,                  // Oracle address (controls state)
-    contestantDepositAmount, // Fixed deposit for primary participants
-    oracleFee,               // Oracle fee in basis points (max 1000 = 10%)
-    expiry                   // Expiration timestamp
+    paymentToken,                      // ERC20 token address (e.g., CUT)
+    oracle,                            // Oracle address (controls state)
+    contestantDepositAmount,           // Fixed deposit for primary participants
+    oracleFee,                         // Oracle fee in basis points (max 1000 = 10%)
+    expiry,                            // Expiration timestamp
+    primaryDepositSecondarySubsidyBps  // e.g. 700 = 7%; BPS of each primary deposit to secondary subsidy (unbacked)
 );
 ```
 
@@ -146,6 +147,7 @@ address contest = factory.createContest(
 
 - `paymentToken`: Address of ERC20 token (typically platform token)
 - `oracleFee`: 100 = 1% fee
+- `primaryDepositSecondarySubsidyBps`: 700 = 7% (matches test and doc baselines in this repo)
 
 ## Testing Guide
 

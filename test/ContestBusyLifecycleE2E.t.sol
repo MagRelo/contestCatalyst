@@ -10,6 +10,7 @@ contract ContestBusyLifecycleE2E is Test {
     uint256 public constant PRIMARY_DEPOSIT = 25e18;
     uint256 public constant PURCHASE_INCREMENT = 10e18;
     uint256 public constant ORACLE_FEE_BPS = 500;
+    uint256 public constant PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS = 700;
     uint256 public constant ENTRY_1 = 1;
     uint256 public constant ENTRY_2 = 2;
     uint256 public constant ENTRY_3 = 3;
@@ -38,7 +39,8 @@ contract ContestBusyLifecycleE2E is Test {
             oracle,
             PRIMARY_DEPOSIT,
             ORACLE_FEE_BPS,
-            block.timestamp + EXPIRY_OFFSET
+            block.timestamp + EXPIRY_OFFSET,
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
         );
         contest = ContestController(c);
 
@@ -134,7 +136,8 @@ contract ContestBusyLifecycleE2E is Test {
         uint256 totalSecondaryBought =
             (PURCHASE_INCREMENT * 3) + (PURCHASE_INCREMENT * 5) + (PURCHASE_INCREMENT * 2) + (PURCHASE_INCREMENT * 4)
                 + (PURCHASE_INCREMENT * 1) + (PURCHASE_INCREMENT * 2);
-        assertEq(contest.getSecondarySideBalance(), totalSecondaryBought);
+        uint256 threeSubsidy = 3 * ((PRIMARY_DEPOSIT * PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS) / 10_000);
+        assertEq(contest.getSecondarySideBalance(), totalSecondaryBought + threeSubsidy);
 
         vm.prank(oracle);
         contest.activateContest();
@@ -153,10 +156,10 @@ contract ContestBusyLifecycleE2E is Test {
         contest.settleContest(winners, payouts);
 
         // All secondary liquidity is merged onto the winning secondary entry.
-        assertEq(contest.secondaryLiquidityPerEntry(ENTRY_2), totalSecondaryBought);
+        assertEq(contest.secondaryLiquidityPerEntry(ENTRY_2), totalSecondaryBought + threeSubsidy);
         assertEq(contest.secondaryLiquidityPerEntry(ENTRY_1), 0);
         assertEq(contest.secondaryLiquidityPerEntry(ENTRY_3), 0);
-        assertEq(contest.getSecondarySideBalance(), totalSecondaryBought);
+        assertEq(contest.getSecondarySideBalance(), totalSecondaryBought + threeSubsidy);
 
         uint256 expectedOracleFees;
 

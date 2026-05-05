@@ -136,7 +136,7 @@ forge test --match-path test/SecondaryPricingSimulation.t.sol -vvv
 
 ### Simulation Test Results
 
-The following tables show simulation results from test runs with **standard settings** (5% oracle fee on settled claims, secondary purchases minting to the participant from the current curve supply, primary deposits accruing to `primaryPrizePool`). They illustrate how the polynomial bonding curve behaves in practice.
+The following tables show simulation results from test runs with **standard settings** (5% oracle fee on settled claims, `primaryDepositSecondarySubsidyBps = 700` so 7% of each primary deposit credits per-entry secondary subsidy and 93% credits `primaryPrizePool`, secondary purchases minting to the participant from the current curve supply). They illustrate how the polynomial bonding curve behaves in practice.
 
 Keep scenario numbers aligned with `forge test --match-path test/SecondaryPricingSimulation.t.sol -vv`; use `-vvv` and update tables when economics or curve constants change.
 
@@ -146,8 +146,8 @@ Three users each purchase $10 worth of shares on entry 1.
 
 | User   | Purchase Size | Tokens Received | % of Total Shares | Price Before | Price After | Price Change | Price Per Share |
 | ------ | ------------- | --------------- | ----------------- | ------------ | ----------- | ------------ | --------------- |
-| User 1 | $10           | 9.9997e18       | 100.00%           | 1.0000       | 1.0004      | +0.04%       | 1.0002          |
-| User 2 | $10           | 9.9977e18       | 50.00%            | 1.0001       | 1.0016      | +0.15%       | 1.0002          |
+| User 1 | $10           | 9.9997e18       | 100.00%           | 1.0000       | 1.0001      | +0.01%       | 1.0000          |
+| User 2 | $10           | 9.9977e18       | 50.00%            | 1.0001       | 1.0004      | +0.03%       | 1.0002          |
 | User 3 | $10           | 9.9937e18       | 33.33%            | 1.0004       | 1.0009      | +0.05%       | 1.0006          |
 
 **Observations:**
@@ -264,10 +264,12 @@ Early buyers purchase, then whale makes large purchase.
 
 ## Deposit Flow
 
-When a secondary participant pays `amount` for an entry:
+When a **primary** participant deposits `primaryDepositAmount` for an entry, `primaryDepositSecondarySubsidyBps` (standard **700**) credits that entry’s `secondaryPrimarySubsidyPerEntry` and the remainder credits `primaryPrizePool` (no ERC1155 mint from the carve).
+
+When a **secondary** participant pays `amount` for an entry:
 
 1. **Minting:** Tokens are computed with `SecondaryPricing.calculateTokensFromCollateral` from the entry’s current nonnegative `netPosition`; ERC1155 is minted to the caller for that amount.
-2. **Liquidity:** The full `amount` is credited to that entry’s `secondaryLiquidityPerEntry[entryId]` (payment-token backing for OPEN/CANCELLED sell-backs on that entry). At settlement, all entries’ balances are merged into the winning primary entry’s slot for pro-rata redemption by that entry’s ERC1155 holders.
+2. **Liquidity:** The full `amount` is credited to that entry’s `secondaryLiquidityPerEntry[entryId]` (payment-token backing for OPEN/CANCELLED sell-backs on that entry). At settlement, all entries’ backed + subsidy balances are merged into the winning primary entry’s slot for pro-rata redemption by that entry’s ERC1155 holders.
 
 Oracle fees apply on settled secondary payout claims (`claimSecondaryPayout` / `pushSecondaryPayouts`), not at deposit time.
 
@@ -286,6 +288,7 @@ Oracle fees apply on settled secondary payout claims (`claimSecondaryPayout` / `
 | Parameter                        | Value | Description                                                                 |
 | -------------------------------- | ----- | --------------------------------------------------------------------------- |
 | `oracleFeeBps`                   | 500   | Oracle fee: 5% (500 basis points)                                           |
+| `primaryDepositSecondarySubsidyBps` | 700 | 7% of each primary deposit to per-entry subsidy; 93% to `primaryPrizePool` |
 
 ### Tuning Parameters
 
@@ -384,7 +387,7 @@ However, the implementation uses Simpson's rule for numerical integration, which
 
 ## Model summary
 
-- **Primary:** deposits accrue to `primaryPrizePool` until settlement claims.
+- **Primary:** each deposit splits per `primaryDepositSecondarySubsidyBps` (standard 7% subsidy carve, 93% to `primaryPrizePool`) until settlement claims.
 - **Secondary:** per-entry `secondaryLiquidityPerEntry` until settlement merge; each purchase applies the polynomial curve once and mints to the caller.
 
 Re-run `forge test --match-path test/SecondaryPricingSimulation.t.sol -vv` to refresh tables after changing economics or curve constants.

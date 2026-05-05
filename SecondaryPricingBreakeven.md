@@ -8,11 +8,12 @@ This analysis uses the following contest settings:
 | ---------------------------------- | ----- | ----------------------------------------------------------------------------- |
 | `PRIMARY_DEPOSIT`                  | $25   | Fixed amount each primary participant must deposit                            |
 | `oracleFeeBps`                     | 500   | Oracle fee: 5% (500 basis points)                                               |
+| `primaryDepositSecondarySubsidyBps`| 700   | 7% of each primary deposit credits `secondaryPrimarySubsidyPerEntry` (unbacked) |
 | `COEFFICIENT`                      | 1     | Quadratic bonding curve coefficient                                           |
 | `BASE_PRICE`                       | 1e6   | Minimum price: 1.0 (scaled by PRICE_PRECISION)                                  |
 | `PRICE_PRECISION`                  | 1e6   | Price precision: 1.0 = 1,000,000                                              |
 
-While the contest is open, primary funds sit in `primaryPrizePool` and secondary collateral is recorded per entry in `secondaryLiquidityPerEntry` (used for OPEN/CANCELLED sell-backs). At settlement, each entry’s secondary balance is merged into the winning primary entry’s id so holders redeem pro-rata against the combined secondary TVL.
+While the contest is open, each primary deposit splits: the carve sits in `secondaryPrimarySubsidyPerEntry[entryId]` and the remainder in `primaryPrizePool`. Secondary **buys** credit `secondaryLiquidityPerEntry` (backed; used for OPEN/CANCELLED sell-backs). At settlement, each entry’s backed + subsidy balances are merged into the winning primary entry’s id so holders redeem pro-rata against the combined secondary TVL.
 
 ## Overview
 
@@ -23,10 +24,10 @@ This document analyzes when additional betting on a single entry becomes economi
 ## Test Setup
 
 - **Initial Configuration:**
-  - **5 primary entries created** ($25 per entry = $125 total deposited into `primaryPrizePool`)
+  - **5 primary entries created** ($25 per entry → **$116.25** into `primaryPrizePool` and **$8.75** total into per-entry subsidy at 7% BPS)
   - **Each primary entry buys $20 secondary on their own entry**; each payment credits that entry’s `secondaryLiquidityPerEntry` and updates bonding-curve supply (settlement merge to the winning entry is outside this exercise)
   - **Primary `primaryPrizePool`** is unchanged when users add secondary positions
-  - **Entry 1 initial state:** ~20.0 tokens on Entry 1, ~20% of global secondary supply (equal `$20` self-bets on each of the five entries)
+  - **Entry 1 initial state:** ~20.0 tokens on Entry 1, ~20% of global secondary supply (equal `$20` self-bets on each of the five entries; aggregate `getSecondarySideBalance` also includes **$8.75** primary subsidy)
   - **Two bettors alternate $10 purchases** on Entry 1, competing for ownership
   - Analysis tracks break-even economics for each bettor as they compete
 
@@ -38,7 +39,7 @@ This document analyzes when additional betting on a single entry becomes economi
 
 - **Bettor 1 break-even:** Purchase #11, marginal value ≈$9.33, net value $0
 - **Bettor 2 break-even:** Purchase #12, marginal value ≈$9.57, net value $0
-- **Total wagered on Entry 1 at break-even:** $120 (initial $20 + $100 in competitive purchases)
+- **Total wagered on Entry 1 at break-even:** $120 (initial $20 + $100 in competitive purchases; aggregate TVL includes the $8.75 bootstrap subsidy in `getSecondarySideBalance`)
 - **Price at break-even:** ~1.017 (≈1.7% above base price)
 
 **Key Insight:** With two bettors competing, ownership swings back and forth between them. Each bettor's purchases become less profitable as:
@@ -51,14 +52,14 @@ Both bettors eventually reach break-even, demonstrating that competition doesn't
 
 ### Initial State
 
-- **Primary prize pool:** $125 from five `PRIMARY_DEPOSIT` payments while OPEN (oracle fee applies later on settled primary claims, not at deposit)
-- **Aggregate secondary TVL (`getSecondarySideBalance`):** $100 from five initial `$20` self-bets (each full payment credits that entry’s `secondaryLiquidityPerEntry`)
+- **Primary prize pool:** **$116.25** from five `PRIMARY_DEPOSIT` payments while OPEN (93% of each deposit; oracle fee applies later on settled primary claims, not at deposit)
+- **Aggregate secondary TVL (`getSecondarySideBalance`):** **$108.75** = $100 backed from five `$20` self-bets plus **$8.75** primary subsidy (each self-bet credits that entry’s `secondaryLiquidityPerEntry`; subsidy is per-entry and unbacked)
 - **Entry 1 shares:** ~20.0 tokens after Entry 1’s `$20` self-bet (full payment priced on a single curve leg from zero supply)
 - **Entry 1 ownership:** ~20% of **global** secondary supply across all entries at this point (equal `$20` bets on each of the five entries)
 
 ## Detailed Purchase Analysis
 
-Tables below mix narrative rounding with outputs from `test/SecondaryPricingBreakeven.t.sol`. **Aggregate secondary TVL** after each `$10` buy increases by exactly `$10` (five `$20` bootstrap trades yield `$100` starting TVL). Token counts, marginal value, and price columns should be re-checked with `forge test --match-path test/SecondaryPricingBreakeven.t.sol -vv` after any contract or parameter change.
+Tables below mix narrative rounding with outputs from `test/SecondaryPricingBreakeven.t.sol`. **Aggregate secondary TVL** after each `$10` buy increases by exactly `$10` (bootstrap yields **$108.75** starting TVL: $100 backed + $8.75 subsidy). Token counts, marginal value, and price columns should be re-checked with `forge test --match-path test/SecondaryPricingBreakeven.t.sol -vv` after any contract or parameter change.
 
 ### Competitive Purchases (Ownership Swings)
 
@@ -70,7 +71,7 @@ Tables below mix narrative rounding with outputs from `test/SecondaryPricingBrea
 - **Price after:** ~1.0009 (0.09% above base)
 - **Bettor 1 ownership:** 0% → 33.32%
 - **Bettor 2 ownership:** 0% → 0%
-- **Pot size (aggregate secondary TVL):** $100 → $110
+- **Pot size (aggregate secondary TVL):** $108.75 → $118.75
 - **Marginal value:** ~$36.65
 - **Net value:** ~$26.65
 - **Profitable:** ✅ YES
@@ -83,7 +84,7 @@ Tables below mix narrative rounding with outputs from `test/SecondaryPricingBrea
 - **Price after:** ~1.0016
 - **Bettor 1 ownership:** 33.32% → 24.99% (decreases as Bettor 2 enters)
 - **Bettor 2 ownership:** 0% → 24.98%
-- **Pot size (aggregate secondary TVL):** $110 → $120
+- **Pot size (aggregate secondary TVL):** $118.75 → $128.75
 - **Marginal value:** ~$29.98
 - **Net value:** ~$19.98
 - **Profitable:** ✅ YES
@@ -98,7 +99,7 @@ Tables below mix narrative rounding with outputs from `test/SecondaryPricingBrea
 - **Price after:** ~1.0143
 - **Bettor 1 ownership:** 45.41% → 41.65% (decreases)
 - **Bettor 2 ownership:** 36.34% → 41.61% (increases)
-- **Pot size (aggregate secondary TVL):** $190 → $200
+- **Pot size (aggregate secondary TVL):** $198.75 → $208.75
 - **Marginal value:** ~$10.52
 - **Net value:** ~$0.52
 - **Profitable:** ✅ YES (barely profitable)
@@ -113,7 +114,7 @@ Tables below mix narrative rounding with outputs from `test/SecondaryPricingBrea
 - **Price after:** ~1.0167 (≈1.67% above base)
 - **Bettor 1 ownership:** 41.65% → 46.11% (increases)
 - **Bettor 2 ownership:** 41.61% → 38.43% (decreases)
-- **Pot size (aggregate secondary TVL):** $200 → $210
+- **Pot size (aggregate secondary TVL):** $208.75 → $218.75
 - **Marginal value:** ~$9.33
 - **Net value:** $0
 - **Profitable:** ❌ **NO - BETTOR 1 BREAK-EVEN POINT**
@@ -126,7 +127,7 @@ Tables below mix narrative rounding with outputs from `test/SecondaryPricingBrea
 - **Price after:** ~1.0193 (≈1.93% above base)
 - **Bettor 1 ownership:** 46.11% → 42.84% (decreases)
 - **Bettor 2 ownership:** 38.43% → 42.79% (increases)
-- **Pot size (aggregate secondary TVL):** $210 → $220
+- **Pot size (aggregate secondary TVL):** $218.75 → $228.75
 - **Marginal value:** ~$9.57
 - **Net value:** $0
 - **Profitable:** ❌ **NO - BETTOR 2 BREAK-EVEN POINT**
@@ -153,7 +154,7 @@ After both bettors reach break-even, all purchases show negative returns. Owners
 
 - **Total purchases analyzed:** 50
 - **Total wagered on Entry 1:** $500
-- **Final aggregate secondary TVL:** $600 (`$100` initial cross-entry liquidity + `$10` × 50 purchases credited to Entry 1)
+- **Final aggregate secondary TVL:** $608.75 (`$108.75` initial cross-entry liquidity + `$10` × 50 purchases credited to Entry 1)
 - **Final Entry 1 shares:** ~482.5 tokens
 - **Final bettor ownership:** ~95% combined for the two competing bettors (remainder on other entries’ bootstrap positions)
 
@@ -191,7 +192,7 @@ The price increases from ~1.0004 to ~1.233 over 50 purchases, showing the quadra
 
 ### 4. How aggregate secondary TVL grows
 
-- **Initial:** `$100` total across entries after five `$20` self-bets (no transfers from `primaryPrizePool` during trading).
+- **Initial:** `$108.75` total across entries after five `$20` self-bets plus 7% primary subsidy (no transfers from `primaryPrizePool` during secondary trading).
 - **Each `$10` competitive buy:** adds `$10` to Entry 1’s `secondaryLiquidityPerEntry` and therefore `$10` to `getSecondarySideBalance()` (other entries unchanged until someone trades there).
 - **Ownership swings** reflect curve minting and competition on Entry 1 only.
 
@@ -199,7 +200,7 @@ The price increases from ~1.0004 to ~1.233 over 50 purchases, showing the quadra
 
 With `COEFFICIENT = 1` and competitive betting (two bettors alternating):
 
-- Break-even occurs at ~$120 total wagering (initial $20 + $100 competitive = Purchases #11-12)
+- Break-even occurs at ~$120 **competitive** wagering on Entry 1 (initial $20 + $100; Purchases #11–12), with baseline aggregate TVL **$8.75** higher than the $100 backed-only case because of primary subsidy
 - Price increases from ~1.0004x to ~1.014-1.019x at break-even
 - Price increases to ~1.233x by Purchase #50
 - **Critical factor:** Competition causes ownership to swing, but both bettors reach break-even at similar points. The quadratic bonding curve's price increases eventually make further betting unprofitable for both, regardless of competitive dynamics.
@@ -286,11 +287,11 @@ For competing bettors considering additional purchases:
 
 With competitive betting (two bettors alternating):
 
-- **Maximum economically viable wagering:** ~$110-120 per entry (10-12 purchases total, 5-6 per bettor)
+- **Maximum economically viable wagering:** ~$110–120 **per-entry competitive** spend on Entry 1 (10–12 purchases total, 5–6 per bettor), same competitive path as pre-subsidy baselines
 - **Beyond this point:** Both bettors become unprofitable, regardless of who's ahead
 - **Key insight:** Competition causes ownership swings, but doesn't prevent break-even. The bonding curve's price increases eventually make further betting unprofitable for all participants.
 - **Final state:** Ownership stabilizes near 50/50, but both bettors are losing money on additional purchases
-- **Liquidity:** Each competitive buy increases aggregate secondary TVL by the payment amount (`$100` → `$110` → … as `$10` purchases land on Entry 1).
+- **Liquidity:** Each competitive buy increases aggregate secondary TVL by the payment amount (`$108.75` → `$118.75` → … as `$10` purchases land on Entry 1).
 
 ## Secondary payment flow
 
@@ -303,13 +304,15 @@ On `addSecondaryPosition(entryId, amount)`:
 
 Secondary trades do not debit or credit `primaryPrizePool`; that pool changes on primary add/remove and on settlement payouts.
 
+On `addPrimaryPosition`, **7%** of `PRIMARY_DEPOSIT` credits `secondaryPrimarySubsidyPerEntry[entryId]` and **93%** credits `primaryPrizePool` (standard `primaryDepositSecondarySubsidyBps = 700`).
+
 ## Conclusion
 
-With `COEFFICIENT = 1` and competitive betting (two bettors alternating), the break-even points occur at approximately **$120 total wagering** on a single entry (initial $20 + $100 competitive). This means:
+With `COEFFICIENT = 1`, `primaryDepositSecondarySubsidyBps = 700`, and competitive betting (two bettors alternating), the break-even points still occur at approximately **$120 total Entry-1 wagering** (initial $20 + $100 competitive; Purchases #11–12), while aggregate `getSecondarySideBalance` is **$8.75** higher throughout because of the primary subsidy carve. This means:
 
-- ✅ **$20-110 wagering (Purchases #1-10):** Profitable for both bettors (returns taper from ~267% toward ~0%)
-- ⚠️ **$120 wagering (Purchases #11-12):** Break-even points for both bettors (0% return)
-- ❌ **$120+ wagering:** Unprofitable for both (negative returns, marginal value < cost)
+- ✅ **$20–110 Entry-1 wagering (Purchases #1–10):** Profitable for both bettors (returns taper from ~267% toward ~0%)
+- ⚠️ **$120 Entry-1 wagering (Purchases #11–12):** Break-even points for both bettors (0% return)
+- ❌ **$120+ Entry-1 wagering:** Unprofitable for both (negative returns, marginal value < cost)
 
 **Critical Finding:** Competition causes ownership to swing back and forth, but both bettors reach break-even at similar points. The quadratic bonding curve's price increases eventually make further betting unprofitable for all participants, regardless of competitive dynamics. This demonstrates that competition doesn't prevent the economic limits of the bonding curve - fees and rising prices eventually make additional betting unprofitable for everyone.
 

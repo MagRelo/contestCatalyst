@@ -17,6 +17,8 @@ import "solmate/tokens/ERC20.sol";
  * 3. Calculates break-even economics at each step
  * 4. Identifies when marginal cost exceeds marginal value
  * 
+ * Standard `primaryDepositSecondarySubsidyBps = 700` (7% primary carve to per-entry secondary subsidy).
+ *
  * Run with: forge test --match-path test/SecondaryPricingBreakeven.t.sol -vv
  */
 contract BreakEvenAnalysis is Test {
@@ -30,6 +32,7 @@ contract BreakEvenAnalysis is Test {
     
     uint256 public constant PRIMARY_DEPOSIT = 25e18; // $25
     uint256 public constant PURCHASE_INCREMENT = 10e18; // $10 increments for analysis
+    uint256 public constant PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS = 700; // 7% standard carve
     
     struct BreakEvenData {
         uint256 purchaseNumber;
@@ -65,7 +68,8 @@ contract BreakEvenAnalysis is Test {
             oracle,
             PRIMARY_DEPOSIT,
             500, // 5% oracle fee
-            block.timestamp + 365 days
+            block.timestamp + 365 days,
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
         );
         
         contest = ContestController(contestAddress);
