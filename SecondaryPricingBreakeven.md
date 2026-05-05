@@ -8,7 +8,6 @@ This analysis uses the following contest settings:
 | ---------------------------------- | ----- | ----------------------------------------------------------------------------- |
 | `PRIMARY_DEPOSIT`                  | $25   | Fixed amount each primary participant must deposit                            |
 | `oracleFeeBps`                     | 500   | Oracle fee: 5% (500 basis points)                                               |
-| `primaryEntryInvestmentShareBps`   | 500   | 5% of each secondary buy funds the owner’s curve leg before the buyer’s leg   |
 | `COEFFICIENT`                      | 1     | Quadratic bonding curve coefficient                                           |
 | `BASE_PRICE`                       | 1e6   | Minimum price: 1.0 (scaled by PRICE_PRECISION)                                  |
 | `PRICE_PRECISION`                  | 1e6   | Price precision: 1.0 = 1,000,000                                              |
@@ -27,7 +26,7 @@ This document analyzes when additional betting on a single entry becomes economi
   - **5 primary entries created** ($25 per entry = $125 total deposited into `primaryPrizePool`)
   - **Each primary entry buys $20 secondary on their own entry**; each payment credits that entry’s `secondaryLiquidityPerEntry` and updates bonding-curve supply (settlement merge to the winning entry is outside this exercise)
   - **Primary `primaryPrizePool`** is unchanged when users add secondary positions
-  - **Entry 1 initial state:** 18.05 tokens, 20% ownership (equal bets on all 5 entries)
+  - **Entry 1 initial state:** ~20.0 tokens on Entry 1, ~20% of global secondary supply (equal `$20` self-bets on each of the five entries)
   - **Two bettors alternate $10 purchases** on Entry 1, competing for ownership
   - Analysis tracks break-even economics for each bettor as they compete
 
@@ -37,10 +36,10 @@ This document analyzes when additional betting on a single entry becomes economi
 
 **Bettor 1 reaches break-even at Purchase #11**, and **Bettor 2 reaches break-even at Purchase #12**.
 
-- **Bettor 1 break-even:** Purchase #11, marginal value $9.23, net value $0
-- **Bettor 2 break-even:** Purchase #12, marginal value $9.43, net value $0
+- **Bettor 1 break-even:** Purchase #11, marginal value ≈$9.33, net value $0
+- **Bettor 2 break-even:** Purchase #12, marginal value ≈$9.57, net value $0
 - **Total wagered on Entry 1 at break-even:** $120 (initial $20 + $100 in competitive purchases)
-- **Price at break-even:** ~1.014 (1.4% above base price)
+- **Price at break-even:** ~1.017 (≈1.7% above base price)
 
 **Key Insight:** With two bettors competing, ownership swings back and forth between them. Each bettor's purchases become less profitable as:
 
@@ -54,7 +53,7 @@ Both bettors eventually reach break-even, demonstrating that competition doesn't
 
 - **Primary prize pool:** $125 from five `PRIMARY_DEPOSIT` payments while OPEN (oracle fee applies later on settled primary claims, not at deposit)
 - **Aggregate secondary TVL (`getSecondarySideBalance`):** $100 from five initial `$20` self-bets (each full payment credits that entry’s `secondaryLiquidityPerEntry`)
-- **Entry 1 shares:** ~18.05 tokens after Entry 1’s owner-leg + buyer-leg split on its own `$20` trade (see `primaryEntryInvestmentShareBps`)
+- **Entry 1 shares:** ~20.0 tokens after Entry 1’s `$20` self-bet (full payment priced on a single curve leg from zero supply)
 - **Entry 1 ownership:** ~20% of **global** secondary supply across all entries at this point (equal `$20` bets on each of the five entries)
 
 ## Detailed Purchase Analysis
@@ -66,27 +65,27 @@ Tables below mix narrative rounding with outputs from `test/SecondaryPricingBrea
 #### Purchase #1: Bettor 1 - $10
 
 - **Cost:** $10
-- **Tokens received:** 9.02
-- **Price before:** 1.0003 (0.03% above base)
-- **Price after:** 1.0007 (0.07% above base)
+- **Tokens received:** ~9.99
+- **Price before:** ~1.0004 (0.04% above base)
+- **Price after:** ~1.0009 (0.09% above base)
 - **Bettor 1 ownership:** 0% → 33.32%
 - **Bettor 2 ownership:** 0% → 0%
 - **Pot size (aggregate secondary TVL):** $100 → $110
-- **Marginal value:** $39.02
-- **Net value:** $29.02
+- **Marginal value:** ~$36.65
+- **Net value:** ~$26.65
 - **Profitable:** ✅ YES
 
 #### Purchase #2: Bettor 2 - $10
 
 - **Cost:** $10
-- **Tokens received:** 9.02
-- **Price before:** 1.0007
-- **Price after:** 1.0013
+- **Tokens received:** ~9.99
+- **Price before:** ~1.0009
+- **Price after:** ~1.0016
 - **Bettor 1 ownership:** 33.32% → 24.99% (decreases as Bettor 2 enters)
 - **Bettor 2 ownership:** 0% → 24.98%
 - **Pot size (aggregate secondary TVL):** $110 → $120
-- **Marginal value:** $31.51
-- **Net value:** $21.51
+- **Marginal value:** ~$29.98
+- **Net value:** ~$19.98
 - **Profitable:** ✅ YES
 
 **Key Observation:** Ownership swings back and forth. When Bettor 2 purchases, Bettor 1's ownership percentage decreases even though Bettor 1's absolute shares remain the same.
@@ -94,14 +93,14 @@ Tables below mix narrative rounding with outputs from `test/SecondaryPricingBrea
 #### Purchase #10: Bettor 2 - $10
 
 - **Cost:** $10
-- **Tokens received:** 8.93
-- **Price before:** 1.0098
-- **Price after:** 1.0116
+- **Tokens received:** ~9.87
+- **Price before:** ~1.0120
+- **Price after:** ~1.0143
 - **Bettor 1 ownership:** 45.41% → 41.65% (decreases)
 - **Bettor 2 ownership:** 36.34% → 41.61% (increases)
 - **Pot size (aggregate secondary TVL):** $190 → $200
-- **Marginal value:** $10.45
-- **Net value:** $0.45
+- **Marginal value:** ~$10.52
+- **Net value:** ~$0.52
 - **Profitable:** ✅ YES (barely profitable)
 
 ### Break-Even Points
@@ -109,26 +108,26 @@ Tables below mix narrative rounding with outputs from `test/SecondaryPricingBrea
 #### Purchase #11: Bettor 1 - $10
 
 - **Cost:** $10
-- **Tokens received:** 8.91
-- **Price before:** 1.0116
-- **Price after:** 1.0136 (1.36% above base)
+- **Tokens received:** ~9.85
+- **Price before:** ~1.0143
+- **Price after:** ~1.0167 (≈1.67% above base)
 - **Bettor 1 ownership:** 41.65% → 46.11% (increases)
 - **Bettor 2 ownership:** 41.61% → 38.43% (decreases)
 - **Pot size (aggregate secondary TVL):** $200 → $210
-- **Marginal value:** $9.23
+- **Marginal value:** ~$9.33
 - **Net value:** $0
 - **Profitable:** ❌ **NO - BETTOR 1 BREAK-EVEN POINT**
 
 #### Purchase #12: Bettor 2 - $10
 
 - **Cost:** $10
-- **Tokens received:** 8.89
-- **Price before:** 1.0136
-- **Price after:** 1.0158 (1.58% above base)
+- **Tokens received:** ~9.82
+- **Price before:** ~1.0167
+- **Price after:** ~1.0193 (≈1.93% above base)
 - **Bettor 1 ownership:** 46.11% → 42.84% (decreases)
 - **Bettor 2 ownership:** 38.43% → 42.79% (increases)
 - **Pot size (aggregate secondary TVL):** $210 → $220
-- **Marginal value:** $9.43
+- **Marginal value:** ~$9.57
 - **Net value:** $0
 - **Profitable:** ❌ **NO - BETTOR 2 BREAK-EVEN POINT**
 
@@ -155,24 +154,24 @@ After both bettors reach break-even, all purchases show negative returns. Owners
 - **Total purchases analyzed:** 50
 - **Total wagered on Entry 1:** $500
 - **Final aggregate secondary TVL:** $600 (`$100` initial cross-entry liquidity + `$10` × 50 purchases credited to Entry 1)
-- **Final Entry 1 shares:** 398.95 tokens
-- **Final bettor ownership:** 95% (increased from 0% to 95%)
+- **Final Entry 1 shares:** ~482.5 tokens
+- **Final bettor ownership:** ~95% combined for the two competing bettors (remainder on other entries’ bootstrap positions)
 
 ### Price Progression
 
-- **Starting price:** 1.0003 (0.03% above base price)
-- **Price at break-even (Purchase #11-12):** 1.0136-1.0158 (1.36-1.58% above base)
-- **Final price (Purchase #50):** 1.1623 (16.23% above base)
+- **Starting price:** ~1.0004 (0.04% above base price)
+- **Price at break-even (Purchase #11-12):** ~1.014-1.019 (≈1.4-1.9% above base)
+- **Final price (Purchase #50):** ~1.233 (≈23.3% above base)
 
-The price increases from ~1.0003 to ~1.1623 over 50 purchases, showing the quadratic bonding curve effect. Despite competitive ownership swings, prices rise steadily, eventually making further betting unprofitable for both bettors.
+The price increases from ~1.0004 to ~1.233 over 50 purchases, showing the quadratic bonding curve effect. Despite competitive ownership swings, prices rise steadily, eventually making further betting unprofitable for both bettors.
 
 ## Key Insights
 
 ### 1. Early Purchases Are Highly Profitable for Both Bettors
 
-- Purchase #1 (Bettor 1): $29.02 net value (290% return)
-- Purchase #2 (Bettor 2): $21.51 net value (215% return)
-- Purchase #3 (Bettor 1): $10.25 net value (102% return)
+- Purchase #1 (Bettor 1): ~$26.65 net value (~267% return on $10)
+- Purchase #2 (Bettor 2): ~$19.98 net value (~200% return)
+- Purchase #3 (Bettor 1): ~$9.48 net value (~95% return)
 - Both bettors benefit from early purchases, but returns diminish as competition intensifies
 
 ### 2. Ownership Swings Back and Forth
@@ -185,8 +184,8 @@ The price increases from ~1.0003 to ~1.1623 over 50 purchases, showing the quadr
 
 ### 3. Both Bettors Reach Break-Even
 
-- **Bettor 1 break-even:** Purchase #11 (marginal value $9.23)
-- **Bettor 2 break-even:** Purchase #12 (marginal value $9.43)
+- **Bettor 1 break-even:** Purchase #11 (marginal value ≈$9.33)
+- **Bettor 2 break-even:** Purchase #12 (marginal value ≈$9.57)
 - **Key insight:** Competition doesn't prevent break-even - both bettors become unprofitable within one purchase of each other
 - **Reason:** Rising prices and diminishing ownership gains affect both bettors equally, regardless of who's ahead
 
@@ -201,8 +200,8 @@ The price increases from ~1.0003 to ~1.1623 over 50 purchases, showing the quadr
 With `COEFFICIENT = 1` and competitive betting (two bettors alternating):
 
 - Break-even occurs at ~$120 total wagering (initial $20 + $100 competitive = Purchases #11-12)
-- Price increases from 1.0003x to 1.0136-1.0158x at break-even point
-- Price increases to 1.16x by Purchase #50
+- Price increases from ~1.0004x to ~1.014-1.019x at break-even
+- Price increases to ~1.233x by Purchase #50
 - **Critical factor:** Competition causes ownership to swing, but both bettors reach break-even at similar points. The quadratic bonding curve's price increases eventually make further betting unprofitable for both, regardless of competitive dynamics.
 
 **If COEFFICIENT were higher:**
@@ -256,14 +255,14 @@ At Purchase #11 (Bettor 1 break-even):
 - Cost: $10
 - Ownership increase: ~4.5% (41.65% → 46.11%)
 - Aggregate secondary TVL after trade: $210
-- Marginal value: $9.23 (just below cost, making it break-even)
+- Marginal value: ~$9.33 (just below cost, making it break-even)
 
 At Purchase #12 (Bettor 2 break-even):
 
 - Cost: $10
 - Ownership increase: ~4.4% (38.43% → 42.79%)
 - Aggregate secondary TVL after trade: $220
-- Marginal value: $9.43 (just below cost, making it break-even)
+- Marginal value: ~$9.57 (just below cost, making it break-even)
 
 As more is wagered:
 
@@ -299,7 +298,7 @@ On `addSecondaryPosition(entryId, amount)`:
 
 1. The caller transfers **`amount`** payment token into the contest.
 2. The full **`amount`** is credited to `secondaryLiquidityPerEntry[entryId]` (collateral for OPEN/CANCELLED sell-backs; merged at settlement).
-3. **`primaryEntryInvestmentShareBps`** applies only to **minting**: the entry owner is priced on the first curve leg, then the buyer on the updated supply; the same **`amount`** backs both legs in liquidity accounting.
+3. **Minting:** `SecondaryPricing.calculateTokensFromCollateral` uses current nonnegative `netPosition[entryId]` as the starting supply; ERC1155 is minted to `msg.sender` for the computed amount.
 4. **Oracle fees** apply on settled payout claims (`claim*` / `push*`), not on each secondary trade during OPEN/ACTIVE.
 
 Secondary trades do not debit or credit `primaryPrizePool`; that pool changes on primary add/remove and on settlement payouts.
@@ -308,7 +307,7 @@ Secondary trades do not debit or credit `primaryPrizePool`; that pool changes on
 
 With `COEFFICIENT = 1` and competitive betting (two bettors alternating), the break-even points occur at approximately **$120 total wagering** on a single entry (initial $20 + $100 competitive). This means:
 
-- ✅ **$20-110 wagering (Purchases #1-10):** Profitable for both bettors (returns ranging from 290% to 4%)
+- ✅ **$20-110 wagering (Purchases #1-10):** Profitable for both bettors (returns taper from ~267% toward ~0%)
 - ⚠️ **$120 wagering (Purchases #11-12):** Break-even points for both bettors (0% return)
 - ❌ **$120+ wagering:** Unprofitable for both (negative returns, marginal value < cost)
 

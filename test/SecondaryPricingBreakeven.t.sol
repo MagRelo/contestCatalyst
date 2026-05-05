@@ -65,8 +65,7 @@ contract BreakEvenAnalysis is Test {
             oracle,
             PRIMARY_DEPOSIT,
             500, // 5% oracle fee
-            block.timestamp + 365 days,
-            500 // primaryEntryInvestmentShareBps: 5%
+            block.timestamp + 365 days
         );
         
         contest = ContestController(contestAddress);
@@ -241,13 +240,13 @@ contract BreakEvenAnalysis is Test {
             if (!isProfitable && currentBettor == bettor1 && !bettor1BreakEven) {
                 bettor1BreakEven = true;
                 console.log("\n*** BETTOR 1 BREAK-EVEN POINT REACHED ***");
-                console.log("Purchase #%d is no longer profitable for Bettor 1", i + 1);
+                console.log("Purchase #%d: Bettor 1 break-even (marginal purchase not profitable)", i + 1);
             }
             
             if (!isProfitable && currentBettor == bettor2 && !bettor2BreakEven) {
                 bettor2BreakEven = true;
                 console.log("\n*** BETTOR 2 BREAK-EVEN POINT REACHED ***");
-                console.log("Purchase #%d is no longer profitable for Bettor 2", i + 1);
+                console.log("Purchase #%d: Bettor 2 break-even (marginal purchase not profitable)", i + 1);
             }
             
             console.log("");

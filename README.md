@@ -134,12 +134,11 @@ Use the factory to create a new contest:
 
 ```solidity
 address contest = factory.createContest(
-    paymentToken,                  // ERC20 token address (e.g., CUT)
-    oracle,                        // Oracle address (controls state)
-    contestantDepositAmount,       // Fixed deposit for primary participants
-    oracleFee,                     // Oracle fee in basis points (max 1000 = 10%)
-    expiry,                        // Expiration timestamp
-    primaryEntryInvestmentShareBps // BPS of each secondary buy for entry-owner curve leg, then remainder to buyer (0–10000)
+    paymentToken,            // ERC20 token address (e.g., CUT)
+    oracle,                  // Oracle address (controls state)
+    contestantDepositAmount, // Fixed deposit for primary participants
+    oracleFee,               // Oracle fee in basis points (max 1000 = 10%)
+    expiry                   // Expiration timestamp
 );
 ```
 
@@ -147,7 +146,6 @@ address contest = factory.createContest(
 
 - `paymentToken`: Address of ERC20 token (typically platform token)
 - `oracleFee`: 100 = 1% fee
-- `primaryEntryInvestmentShareBps`: e.g. 500 = 5% of each secondary payment funds the entry owner’s bonding-curve leg before the buyer’s leg
 
 ## Testing Guide
 

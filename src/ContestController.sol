@@ -19,7 +19,7 @@ interface IERC20Balance {
  *      `secondaryLiquidityPerEntry[entryId]` for OPEN/CANCELLED sell-back pricing.
  *      On settlement, all per-entry secondary balances are merged into `secondaryLiquidityPerEntry[secondaryWinningEntry]`
  *      so winning-entry ERC1155 holders redeem pro-rata against the full secondary TVL (or it spills to primary payouts
- *      if there is no supply on the winning entry). primaryEntryInvestmentShareBps splits each buy into owner leg then buyer leg.
+ *      if there is no supply on the winning entry). Each secondary buy credits liquidity and mints ERC1155 to the caller per the bonding curve from the entry's current nonnegative supply.
  */
 contract ContestController is ERC1155, ReentrancyGuard {
     address public immutable paymentToken;
@@ -27,9 +27,6 @@ contract ContestController is ERC1155, ReentrancyGuard {
     uint256 public immutable primaryDepositAmount;
     uint256 public immutable oracleFeeBps;
     uint256 public immutable expiryTimestamp;
-
-    /// @notice BPS of each secondary payment used for primary entry owner curve leg (before buyer leg)
-    uint256 public immutable primaryEntryInvestmentShareBps;
 
     uint256 public constant BPS_DENOMINATOR = 10000;
     uint256 public constant PRICE_PRECISION = 1e6;
@@ -76,9 +73,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
         address indexed participant,
         uint256 indexed entryId,
         uint256 amount,
-        uint256 participantTokensReceived,
-        uint256 primaryEntryInvestment,
-        uint256 ownerTokensReceived
+        uint256 participantTokensReceived
     );
     event SecondaryPositionSold(address indexed participant, uint256 indexed entryId, uint256 tokenAmount, uint256 proceeds);
     event SecondaryPayoutClaimed(address indexed participant, uint256 indexed entryId, uint256 payout);
@@ -100,21 +95,18 @@ contract ContestController is ERC1155, ReentrancyGuard {
         address _oracle,
         uint256 _primaryDepositAmount,
         uint256 _oracleFeeBps,
-        uint256 _expiryTimestamp,
-        uint256 _primaryEntryInvestmentShareBps
+        uint256 _expiryTimestamp
     ) ERC1155() {
         require(_paymentToken != address(0), "Invalid payment token");
         require(_oracle != address(0), "Invalid oracle");
         require(_oracleFeeBps <= 1000, "Oracle fee too high");
         require(_expiryTimestamp > block.timestamp, "Expiry in past");
-        require(_primaryEntryInvestmentShareBps <= BPS_DENOMINATOR, "Invalid primary entry investment share");
 
         paymentToken = _paymentToken;
         oracle = _oracle;
         primaryDepositAmount = _primaryDepositAmount;
         oracleFeeBps = _oracleFeeBps;
         expiryTimestamp = _expiryTimestamp;
-        primaryEntryInvestmentShareBps = _primaryEntryInvestmentShareBps;
 
         state = ContestState.OPEN;
     }
@@ -174,43 +166,17 @@ contract ContestController is ERC1155, ReentrancyGuard {
         SecondaryContest.validateSecondaryMerkleProof(secondaryMerkleRoot, msg.sender, merkleProof);
         SecondaryContest.validateAddSecondaryPosition(entryOwner, entryId, amount, uint8(state));
 
-        uint256 investmentAmount = (amount * primaryEntryInvestmentShareBps) / BPS_DENOMINATOR;
-        uint256 remainingAmount = amount - investmentAmount;
-
         int256 netPos = netPosition[entryId];
         uint256 shares0 = netPos > 0 ? uint256(netPos) : 0;
 
-        uint256 ownerTokens = investmentAmount > 0
-            ? SecondaryPricing.calculateTokensFromCollateral(shares0, investmentAmount)
-            : 0;
-        if (investmentAmount > 0) {
-            require(ownerTokens > 0, "Payment too small: primary entry investment buys no tokens");
-        }
-
-        uint256 shares1 = shares0 + ownerTokens;
-        uint256 buyerTokens = SecondaryPricing.calculateTokensFromCollateral(shares1, remainingAmount);
+        uint256 buyerTokens = SecondaryPricing.calculateTokensFromCollateral(shares0, amount);
         require(buyerTokens > 0, "Payment too small: insufficient to purchase tokens");
 
         secondaryLiquidityPerEntry[entryId] += amount;
 
-        SecondaryContest.processAddSecondaryPosition(
-            netPosition,
-            entryId,
-            msg.sender,
-            amount,
-            investmentAmount,
-            ownerTokens,
-            buyerTokens
-        );
+        SecondaryContest.processAddSecondaryPosition(netPosition, entryId, msg.sender, amount, buyerTokens);
 
-        address owner = entryOwner[entryId];
-        if (ownerTokens > 0) {
-            // Attribute owner-leg collateral to the entry owner
-            secondaryDepositedPerEntry[owner][entryId] += investmentAmount;
-            _mint(owner, entryId, ownerTokens, "");
-        }
-        // Attribute buyer-leg collateral to the secondary buyer
-        secondaryDepositedPerEntry[msg.sender][entryId] += remainingAmount;
+        secondaryDepositedPerEntry[msg.sender][entryId] += amount;
         _mint(msg.sender, entryId, buyerTokens, "");
 
         SafeTransferLib.safeTransferFrom(ERC20(paymentToken), msg.sender, address(this), amount);

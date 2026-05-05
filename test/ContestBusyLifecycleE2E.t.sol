@@ -10,7 +10,6 @@ contract ContestBusyLifecycleE2E is Test {
     uint256 public constant PRIMARY_DEPOSIT = 25e18;
     uint256 public constant PURCHASE_INCREMENT = 10e18;
     uint256 public constant ORACLE_FEE_BPS = 500;
-    uint256 public constant PRIMARY_ENTRY_INVESTMENT_SHARE_BPS = 500;
     uint256 public constant ENTRY_1 = 1;
     uint256 public constant ENTRY_2 = 2;
     uint256 public constant ENTRY_3 = 3;
@@ -39,8 +38,7 @@ contract ContestBusyLifecycleE2E is Test {
             oracle,
             PRIMARY_DEPOSIT,
             ORACLE_FEE_BPS,
-            block.timestamp + EXPIRY_OFFSET,
-            PRIMARY_ENTRY_INVESTMENT_SHARE_BPS
+            block.timestamp + EXPIRY_OFFSET
         );
         contest = ContestController(c);
 
@@ -167,7 +165,6 @@ contract ContestBusyLifecycleE2E is Test {
         expectedOracleFees += _claimPrimaryAndAssert(p1, ENTRY_1);
 
         // Winning secondary holders redeem pro-rata against merged liquidity.
-        // Holders include owner-leg recipient p2 and buyers on ENTRY_2.
         expectedOracleFees += _claimSecondaryAndAssert(p2, ENTRY_2);
         expectedOracleFees += _claimSecondaryAndAssert(b2, ENTRY_2);
         expectedOracleFees += _claimSecondaryAndAssert(b3, ENTRY_2);

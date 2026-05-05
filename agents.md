@@ -43,14 +43,13 @@ The standard initial contract settings are defined in:
 
    - `PRIMARY_DEPOSIT = 25e18` ($25)
    - `oracleFeeBps = 500` (5%)
-   - `primaryEntryInvestmentShareBps = 500` (5%) — owner-first curve leg on each secondary buy
    - `PURCHASE_INCREMENT = 10e18` ($10)
+   - Secondary purchases mint ERC1155 to the caller; each payment is priced along the curve from the entry's current supply.
    - Primary deposits accrue to `primaryPrizePool` only. Secondary collateral is tracked per entry for OPEN/CANCELLED sell-backs; at settlement it is merged onto the winning primary entry for pro-rata redemption (or spilled into primary payouts if there is no winning secondary supply).
 
 2. **`SecondaryPricingBreakeven.md`** - See the "Contest Configuration" section:
    - `PRIMARY_DEPOSIT`: $25
    - `oracleFeeBps`: 500 (5%)
-   - `primaryEntryInvestmentShareBps`: 500 (5%)
    - `COEFFICIENT`: 1
    - `BASE_PRICE`: 1e6
    - `PRICE_PRECISION`: 1e6

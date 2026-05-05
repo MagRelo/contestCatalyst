@@ -136,7 +136,9 @@ forge test --match-path test/SecondaryPricingSimulation.t.sol -vvv
 
 ### Simulation Test Results
 
-The following tables show simulation results from test runs with **standard settings** (5% oracle fee on settled claims, 5% `primaryEntryInvestmentShareBps` owner curve leg on each secondary buy, primary deposits accruing only to `primaryPrizePool`). They illustrate how the polynomial bonding curve behaves in practice.
+The following tables show simulation results from test runs with **standard settings** (5% oracle fee on settled claims, secondary purchases minting to the participant from the current curve supply, primary deposits accruing to `primaryPrizePool`). They illustrate how the polynomial bonding curve behaves in practice.
+
+Keep scenario numbers aligned with `forge test --match-path test/SecondaryPricingSimulation.t.sol -vv`; use `-vvv` and update tables when economics or curve constants change.
 
 #### Scenario 1: Sequential Equal Purchases
 
@@ -144,17 +146,16 @@ Three users each purchase $10 worth of shares on entry 1.
 
 | User   | Purchase Size | Tokens Received | % of Total Shares | Price Before | Price After | Price Change | Price Per Share |
 | ------ | ------------- | --------------- | ----------------- | ------------ | ----------- | ------------ | --------------- |
-| User 1 | $10           | 9.0248e18       | 100.00%           | 1.0000       | 1.0001      | +0.00%       | 1.1081          |
-| User 2 | $10           | 9.0233e18       | 50.00%            | 1.0001       | 1.0003      | +0.02%       | 1.1082          |
-| User 3 | $10           | 9.0204e18       | 33.33%            | 1.0003       | 1.0007      | +0.04%       | 1.1086          |
+| User 1 | $10           | 9.9997e18       | 100.00%           | 1.0000       | 1.0004      | +0.04%       | 1.0002          |
+| User 2 | $10           | 9.9977e18       | 50.00%            | 1.0001       | 1.0016      | +0.15%       | 1.0002          |
+| User 3 | $10           | 9.9937e18       | 33.33%            | 1.0004       | 1.0009      | +0.05%       | 1.0006          |
 
 **Observations:**
 
 - First purchase gets the most tokens (100% of supply initially)
 - Each subsequent purchase receives slightly fewer tokens as price increases
-- Price increases gradually and smoothly for small equal purchases (0.00%, 0.02%, 0.04%)
-- Price per share increases slightly with each purchase (1.1081 → 1.1082 → 1.1086), showing the bonding curve effect
-- **With new settings**: More tokens per dollar (~9.02e18 vs ~4.95e18) due to more collateral per deposit
+- Price increases gradually for small equal purchases; each payment advances the curve from current supply
+- Price per share (amount / tokens, scaled) edges up with each purchase, showing the bonding curve effect
 
 #### Scenario 2: Mixed Purchase Sizes
 
@@ -172,7 +173,6 @@ User 1 purchases $10, Whale purchases $1000, User 3 purchases $10.
 - Whale receives 73.7x more tokens than User 1 (less than 100x due to price movement during purchase)
 - Small purchase after whale gets fewer tokens (5.26e18 vs 9.02e18) due to higher price
 - Price per share increases dramatically for whale purchase (1.1081 → 1.5037), showing quadratic curve effect
-- **With new settings**: More tokens per dollar for all purchases, but same qualitative behavior
 
 #### Scenario 3: Multiple Entries Competition
 
@@ -214,7 +214,6 @@ User 1 purchases early ($100), then many users purchase, then User 1 purchases a
 - Price increased from 1.0000 to 1.2626 (26.26% increase) between purchases
 - Early bettors receive better value: 1.111 vs 1.606 price per share (44.5% better for early)
 - Price per share increases significantly for late purchase (1.111 → 1.606), showing strong early bettor advantage
-- **With new settings**: More tokens overall, but same qualitative advantage for early buyers
 
 #### Scenario 5: Whale Purchase Impact
 
@@ -236,7 +235,6 @@ Small purchases establish baseline, then whale makes massive purchase ($10,000).
 - Whale pays 2.35x more per share than baseline (2.609 vs 1.108) due to quadratic curve
 - Small purchase after whale gets 18.7x fewer tokens (4.82e17 vs 9.02e18) due to massive price increase
 - Price per share for User 4 is 18.7x higher than baseline (20.73 vs 1.108), showing strong whale protection
-- **With new settings**: More dramatic price impact due to larger token amounts, demonstrating quadratic curve protection
 
 #### Scenario 6: Early Buyers Maintain Share
 
@@ -263,15 +261,13 @@ Early buyers purchase, then whale makes large purchase.
 - Whale purchase increases price by 1475.72%, dramatically affecting subsequent purchases
 - Early buyers paid 1.111-1.294 per share, whale paid 2.680 per share (2.41x more)
 - Early buyers maintain their absolute position but are diluted by whale's purchase
-- **With new settings**: More tokens overall, but same dilution effect - early buyers maintain absolute position but lose percentage share
 
 ## Deposit Flow
 
 When a secondary participant pays `amount` for an entry:
 
-1. **Primary entry investment**: `amount * primaryEntryInvestmentShareBps / 10000` is spent on the owner’s curve leg first (mints owner ERC1155).
-2. **Buyer leg**: The remainder is spent on the buyer’s curve leg (mints buyer ERC1155).
-3. **Liquidity**: The full `amount` is credited to that entry’s `secondaryLiquidityPerEntry[entryId]` (payment-token backing for OPEN/CANCELLED sell-backs on that entry). At settlement, all entries’ balances are merged into the winning primary entry’s slot for pro-rata redemption by that entry’s ERC1155 holders.
+1. **Minting:** Tokens are computed with `SecondaryPricing.calculateTokensFromCollateral` from the entry’s current nonnegative `netPosition`; ERC1155 is minted to the caller for that amount.
+2. **Liquidity:** The full `amount` is credited to that entry’s `secondaryLiquidityPerEntry[entryId]` (payment-token backing for OPEN/CANCELLED sell-backs on that entry). At settlement, all entries’ balances are merged into the winning primary entry’s slot for pro-rata redemption by that entry’s ERC1155 holders.
 
 Oracle fees apply on settled secondary payout claims (`claimSecondaryPayout` / `pushSecondaryPayouts`), not at deposit time.
 
@@ -290,7 +286,6 @@ Oracle fees apply on settled secondary payout claims (`claimSecondaryPayout` / `
 | Parameter                        | Value | Description                                                                 |
 | -------------------------------- | ----- | --------------------------------------------------------------------------- |
 | `oracleFeeBps`                   | 500   | Oracle fee: 5% (500 basis points)                                           |
-| `primaryEntryInvestmentShareBps` | 500   | 5% owner-first curve leg on each secondary buy                              |
 
 ### Tuning Parameters
 
@@ -390,6 +385,6 @@ However, the implementation uses Simpson's rule for numerical integration, which
 ## Model summary
 
 - **Primary:** deposits accrue to `primaryPrizePool` until settlement claims.
-- **Secondary:** per-entry `secondaryLiquidityPerEntry` until settlement merge; minting uses the polynomial curve with an owner leg then buyer leg per `primaryEntryInvestmentShareBps`.
+- **Secondary:** per-entry `secondaryLiquidityPerEntry` until settlement merge; each purchase applies the polynomial curve once and mints to the caller.
 
 Re-run `forge test --match-path test/SecondaryPricingSimulation.t.sol -vv` to refresh tables after changing economics or curve constants.

@@ -21,7 +21,7 @@ import "solmate/tokens/ERC20.sol";
  * 
  * Contest Settings:
  * - Oracle fee: 5% (500 bps)
- * - Primary entry investment: 5% (500 bps) — owner-first curve leg on each secondary buy
+ * - Secondary purchases mint ERC1155 to the caller from the current curve supply
  * - Primary prize pool and secondary per-entry liquidity are accounted separately until settlement
  * 
  * Run with `forge test --match-path test/SecondaryPricingSimulation.t.sol -vv` to see console output
@@ -78,8 +78,7 @@ contract SecondaryContestPricingTest is Test {
             oracle,
             PRIMARY_DEPOSIT,
             500, // 5% oracle fee
-            block.timestamp + 365 days,
-            500 // primaryEntryInvestmentShareBps: 5%
+            block.timestamp + 365 days
         );
         
         contest = ContestController(contestAddress);

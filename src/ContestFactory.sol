@@ -13,24 +13,19 @@ contract ContestFactory {
 
     event ContestCreated(address indexed contest, address indexed host, uint256 contestantDepositAmount);
 
-    /**
-     * @param primaryEntryInvestmentShareBps BPS of each secondary buy for entry-owner curve leg (0–10000)
-     */
     function createContest(
         address paymentToken,
         address oracle,
         uint256 contestantDepositAmount,
         uint256 oracleFee,
-        uint256 expiry,
-        uint256 primaryEntryInvestmentShareBps
+        uint256 expiry
     ) external returns (address) {
         ContestController contest = new ContestController(
             paymentToken,
             oracle,
             contestantDepositAmount,
             oracleFee,
-            expiry,
-            primaryEntryInvestmentShareBps
+            expiry
         );
 
         address contestAddress = address(contest);

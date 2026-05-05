@@ -85,18 +85,10 @@ contract TestStorage {
         uint256 entryId,
         address participant,
         uint256 amount,
-        uint256 primaryEntryInvestment,
-        uint256 ownerTokensReceived,
         uint256 participantTokensReceived
     ) external {
         SecondaryContest.processAddSecondaryPosition(
-            netPosition,
-            entryId,
-            participant,
-            amount,
-            primaryEntryInvestment,
-            ownerTokensReceived,
-            participantTokensReceived
+            netPosition, entryId, participant, amount, participantTokensReceived
         );
     }
 
@@ -880,30 +872,24 @@ contract SecondaryContestTest is Test {
     // ============ processAddSecondaryPosition / processRemoveSecondaryPosition ============
 
     function test_processAddSecondaryPosition_emitsAndUpdatesNetPosition() public {
-        uint256 inv = 10e18;
-        uint256 ownerT = 5e18;
         uint256 buyerT = 45e18;
 
         vm.expectEmit(true, true, false, true);
-        emit SecondaryContest.SecondaryPositionAdded(
-            participant1, ENTRY_1, AMOUNT_1, buyerT, inv, ownerT
-        );
+        emit SecondaryContest.SecondaryPositionAdded(participant1, ENTRY_1, AMOUNT_1, buyerT);
 
-        testStorage.processAddSecondaryPosition(
-            ENTRY_1, participant1, AMOUNT_1, inv, ownerT, buyerT
-        );
+        testStorage.processAddSecondaryPosition(ENTRY_1, participant1, AMOUNT_1, buyerT);
 
-        assertEq(uint256(testStorage.netPosition(ENTRY_1)), ownerT + buyerT);
+        assertEq(uint256(testStorage.netPosition(ENTRY_1)), buyerT);
     }
 
     function test_processAddSecondaryPosition_multipleAddsAccumulate() public {
-        testStorage.processAddSecondaryPosition(ENTRY_1, participant1, AMOUNT_1, 5e18, 2e18, 43e18);
-        testStorage.processAddSecondaryPosition(ENTRY_1, participant2, AMOUNT_2, 10e18, 4e18, 86e18);
-        assertEq(uint256(testStorage.netPosition(ENTRY_1)), (2e18 + 43e18) + (4e18 + 86e18));
+        testStorage.processAddSecondaryPosition(ENTRY_1, participant1, AMOUNT_1, 43e18);
+        testStorage.processAddSecondaryPosition(ENTRY_1, participant2, AMOUNT_2, 86e18);
+        assertEq(uint256(testStorage.netPosition(ENTRY_1)), 43e18 + 86e18);
     }
 
     function test_processRemoveSecondaryPosition_reducesNetPosition() public {
-        testStorage.processAddSecondaryPosition(ENTRY_1, participant1, AMOUNT_1, 0, 0, TOKENS_1);
+        testStorage.processAddSecondaryPosition(ENTRY_1, participant1, AMOUNT_1, TOKENS_1);
 
         vm.expectEmit(true, true, false, true);
         emit SecondaryContest.SecondaryPositionSold(participant1, ENTRY_1, TOKENS_1 / 2, 25e18);
@@ -915,32 +901,26 @@ contract SecondaryContestTest is Test {
         assertEq(uint256(testStorage.netPosition(ENTRY_1)), TOKENS_1 / 2);
     }
 
-    function testFuzz_processAddRemove_netPositionConsistent(
-        uint256 ownerT,
-        uint256 buyerT,
-        uint256 burnAmt
-    ) public {
-        ownerT = bound(ownerT, 1, 1e24);
-        buyerT = bound(buyerT, 1, 1e24);
-        uint256 total = ownerT + buyerT;
-        burnAmt = bound(burnAmt, 1, total);
+    function testFuzz_processAddRemove_netPositionConsistent(uint256 mintedT, uint256 burnAmt) public {
+        mintedT = bound(mintedT, 1, 1e24);
+        burnAmt = bound(burnAmt, 1, mintedT);
 
         uint256 amount = AMOUNT_1;
-        testStorage.processAddSecondaryPosition(ENTRY_1, participant1, amount, 1, ownerT, buyerT);
+        testStorage.processAddSecondaryPosition(ENTRY_1, participant1, amount, mintedT);
         testStorage.processRemoveSecondaryPosition(ENTRY_1, participant1, burnAmt, 1);
-        assertEq(uint256(testStorage.netPosition(ENTRY_1)), total - burnAmt);
+        assertEq(uint256(testStorage.netPosition(ENTRY_1)), mintedT - burnAmt);
     }
 
     function test_Integration_addPartialRemoveAdd() public {
-        testStorage.processAddSecondaryPosition(ENTRY_1, participant1, AMOUNT_1, 2e18, 3e18, 45e18);
+        testStorage.processAddSecondaryPosition(ENTRY_1, participant1, AMOUNT_1, 45e18);
         testStorage.processRemoveSecondaryPosition(ENTRY_1, participant1, 25e18, 50e18);
-        testStorage.processAddSecondaryPosition(ENTRY_1, participant1, AMOUNT_2, 1e18, 1e18, 98e18);
+        testStorage.processAddSecondaryPosition(ENTRY_1, participant1, AMOUNT_2, 98e18);
         assertGt(uint256(testStorage.netPosition(ENTRY_1)), 0);
     }
 
     function test_Integration_perEntryIsolation() public {
-        testStorage.processAddSecondaryPosition(ENTRY_1, participant1, AMOUNT_1, 0, 0, TOKENS_1);
-        testStorage.processAddSecondaryPosition(ENTRY_2, participant1, AMOUNT_2, 0, 0, TOKENS_2);
+        testStorage.processAddSecondaryPosition(ENTRY_1, participant1, AMOUNT_1, TOKENS_1);
+        testStorage.processAddSecondaryPosition(ENTRY_2, participant1, AMOUNT_2, TOKENS_2);
         testStorage.processRemoveSecondaryPosition(ENTRY_1, participant1, TOKENS_1, 100e18);
         assertEq(uint256(testStorage.netPosition(ENTRY_1)), 0);
         assertEq(uint256(testStorage.netPosition(ENTRY_2)), TOKENS_2);

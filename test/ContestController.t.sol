@@ -23,7 +23,6 @@ import "solady/utils/MerkleProofLib.sol";
  * All tests respect standard settings from agents.md:
  * - PRIMARY_DEPOSIT = 25e18 ($25)
  * - ORACLE_FEE_BPS = 500 (5%)
- * - PRIMARY_ENTRY_INVESTMENT_SHARE_BPS = 500 (5%)
  * - PURCHASE_INCREMENT = 10e18 ($10)
  */
 contract ContestControllerTest is Test {
@@ -31,7 +30,6 @@ contract ContestControllerTest is Test {
     uint256 public constant PRIMARY_DEPOSIT = 25e18; // $25
     uint256 public constant PURCHASE_INCREMENT = 10e18; // $10
     uint256 public constant ORACLE_FEE_BPS = 500; // 5%
-    uint256 public constant PRIMARY_ENTRY_INVESTMENT_SHARE_BPS = 500; // 5%
     
     // Contest state enum (matches ContestController)
     enum ContestState {
@@ -79,8 +77,7 @@ contract ContestControllerTest is Test {
             oracle,
             PRIMARY_DEPOSIT,
             ORACLE_FEE_BPS,
-            block.timestamp + EXPIRY_OFFSET,
-            PRIMARY_ENTRY_INVESTMENT_SHARE_BPS
+            block.timestamp + EXPIRY_OFFSET
         );
         
         contest = ContestController(contestAddress);
@@ -109,12 +106,11 @@ contract ContestControllerTest is Test {
             _oracle,
             PRIMARY_DEPOSIT,
             ORACLE_FEE_BPS,
-            block.timestamp + _expiryOffset,
-            PRIMARY_ENTRY_INVESTMENT_SHARE_BPS
+            block.timestamp + _expiryOffset
         );
         return ContestController(contestAddress);
     }
-    
+
     /**
      * @notice Fund user and approve contest
      */
@@ -261,7 +257,6 @@ contract ContestControllerTest is Test {
         assertEq(newContest.oracle(), oracle);
         assertEq(newContest.primaryDepositAmount(), PRIMARY_DEPOSIT);
         assertEq(newContest.oracleFeeBps(), ORACLE_FEE_BPS);
-        assertEq(newContest.primaryEntryInvestmentShareBps(), PRIMARY_ENTRY_INVESTMENT_SHARE_BPS);
         assertEq(uint8(newContest.state()), uint8(ContestState.OPEN));
     }
     
@@ -272,8 +267,7 @@ contract ContestControllerTest is Test {
             oracle,
             PRIMARY_DEPOSIT,
             ORACLE_FEE_BPS,
-            block.timestamp + EXPIRY_OFFSET,
-            PRIMARY_ENTRY_INVESTMENT_SHARE_BPS
+            block.timestamp + EXPIRY_OFFSET
         );
     }
     
@@ -284,8 +278,7 @@ contract ContestControllerTest is Test {
             address(0),
             PRIMARY_DEPOSIT,
             ORACLE_FEE_BPS,
-            block.timestamp + EXPIRY_OFFSET,
-            PRIMARY_ENTRY_INVESTMENT_SHARE_BPS
+            block.timestamp + EXPIRY_OFFSET
         );
     }
     
@@ -295,8 +288,7 @@ contract ContestControllerTest is Test {
             oracle,
             0,
             ORACLE_FEE_BPS,
-            block.timestamp + EXPIRY_OFFSET,
-            PRIMARY_ENTRY_INVESTMENT_SHARE_BPS
+            block.timestamp + EXPIRY_OFFSET
         );
         ContestController freeContest = ContestController(contestAddress);
         assertEq(freeContest.primaryDepositAmount(), 0);
@@ -310,8 +302,7 @@ contract ContestControllerTest is Test {
             oracle,
             0,
             ORACLE_FEE_BPS,
-            block.timestamp + EXPIRY_OFFSET,
-            PRIMARY_ENTRY_INVESTMENT_SHARE_BPS
+            block.timestamp + EXPIRY_OFFSET
         );
         ContestController freeContest = ContestController(contestAddress);
         paymentToken.mint(user1, PURCHASE_INCREMENT);
@@ -337,8 +328,7 @@ contract ContestControllerTest is Test {
             oracle,
             PRIMARY_DEPOSIT,
             1001, // > 10%
-            block.timestamp + EXPIRY_OFFSET,
-            PRIMARY_ENTRY_INVESTMENT_SHARE_BPS
+            block.timestamp + EXPIRY_OFFSET
         );
     }
     
@@ -349,20 +339,7 @@ contract ContestControllerTest is Test {
             oracle,
             PRIMARY_DEPOSIT,
             ORACLE_FEE_BPS,
-            block.timestamp - 1,
-            PRIMARY_ENTRY_INVESTMENT_SHARE_BPS
-        );
-    }
-    
-    function test_constructor_InvalidPrimaryEntryInvestmentShare() public {
-        vm.expectRevert("Invalid primary entry investment share");
-        factory.createContest(
-            address(paymentToken),
-            oracle,
-            PRIMARY_DEPOSIT,
-            ORACLE_FEE_BPS,
-            block.timestamp + EXPIRY_OFFSET,
-            10001 // > 100%
+            block.timestamp - 1
         );
     }
     
@@ -864,14 +841,11 @@ contract ContestControllerTest is Test {
         _createPrimaryEntry(user1, ENTRY_1);
 
         uint256 amount = PURCHASE_INCREMENT;
-        uint256 investmentAmount = (amount * PRIMARY_ENTRY_INVESTMENT_SHARE_BPS) / 10000;
-        uint256 remainingAmount = amount - investmentAmount;
 
         _createSecondaryPosition(user2, ENTRY_1, amount);
 
-        // Buyer gets the buyer-leg collateral, and entry owner gets the owner-leg collateral.
-        assertEq(contest.secondaryDepositedPerEntry(user2, ENTRY_1), remainingAmount);
-        assertEq(contest.secondaryDepositedPerEntry(user1, ENTRY_1), investmentAmount);
+        assertEq(contest.secondaryDepositedPerEntry(user2, ENTRY_1), amount);
+        assertEq(contest.secondaryDepositedPerEntry(user1, ENTRY_1), 0);
 
         uint256 userBalBefore = contest.balanceOf(user2, ENTRY_1);
         uint256 tokenToSell = userBalBefore / 2;
@@ -884,8 +858,7 @@ contract ContestControllerTest is Test {
         contest.removeSecondaryPosition(ENTRY_1, tokenToSell);
 
         assertEq(contest.secondaryDepositedPerEntry(user2, ENTRY_1), depositedBefore - expectedPrincipalToForfeit);
-        // Entry owner position is independent; selling buyer tokens shouldn't change owner attribution.
-        assertEq(contest.secondaryDepositedPerEntry(user1, ENTRY_1), investmentAmount);
+        assertEq(contest.secondaryDepositedPerEntry(user1, ENTRY_1), 0);
     }
     
     function test_removeSecondaryPosition_SuccessInCancelledState() public {
@@ -1001,12 +974,6 @@ contract ContestControllerTest is Test {
         vm.prank(user3);
         contest.claimSecondaryPayout(ENTRY_1);
 
-        // Entry owner also holds winning-entry secondary tokens (owner curve leg)
-        if (contest.balanceOf(user1, ENTRY_1) > 0) {
-            vm.prank(user1);
-            contest.claimSecondaryPayout(ENTRY_1);
-        }
-
         assertEq(contest.balanceOf(user3, ENTRY_1), 0);
         assertGt(paymentToken.balanceOf(user3), balanceBefore);
         assertEq(contest.totalSecondaryLiquidity(), 0);
@@ -1019,14 +986,12 @@ contract ContestControllerTest is Test {
         _createPrimaryEntry(user2, ENTRY_2);
 
         uint256 amount = PURCHASE_INCREMENT * 10;
-        uint256 investmentAmount = (amount * PRIMARY_ENTRY_INVESTMENT_SHARE_BPS) / 10000;
-        uint256 remainingAmount = amount - investmentAmount;
 
         _createSecondaryPosition(user3, ENTRY_1, amount);
 
-        assertEq(contest.secondaryDepositedPerEntry(user3, ENTRY_1), remainingAmount);
-        assertEq(contest.secondaryDepositedPerEntry(user1, ENTRY_1), investmentAmount);
-        assertGt(contest.balanceOf(user1, ENTRY_1), 0); // owner-leg tokens exist
+        assertEq(contest.secondaryDepositedPerEntry(user3, ENTRY_1), amount);
+        assertEq(contest.secondaryDepositedPerEntry(user1, ENTRY_1), 0);
+        assertEq(contest.balanceOf(user1, ENTRY_1), 0);
 
         vm.prank(oracle);
         contest.activateContest();
@@ -1046,8 +1011,7 @@ contract ContestControllerTest is Test {
 
         assertEq(contest.balanceOf(user3, ENTRY_1), 0);
         assertEq(contest.secondaryDepositedPerEntry(user3, ENTRY_1), 0);
-        // Owner position remains; only the claimant's tokens were burned.
-        assertEq(contest.secondaryDepositedPerEntry(user1, ENTRY_1), investmentAmount);
+        assertEq(contest.secondaryDepositedPerEntry(user1, ENTRY_1), 0);
     }
     
     function test_claimSecondaryPayout_WrongState() public {
@@ -1137,11 +1101,6 @@ contract ContestControllerTest is Test {
         contest.claimSecondaryPayout(ENTRY_1);
         assertGt(paymentToken.balanceOf(user4), bal4Before);
 
-        if (contest.balanceOf(user1, ENTRY_1) > 0) {
-            vm.prank(user1);
-            contest.claimSecondaryPayout(ENTRY_1);
-        }
-
         assertEq(contest.totalSecondaryLiquidity(), 0);
         assertEq(contest.getSecondarySideBalance(), 0);
         assertEq(secondaryTvlBeforeSettle, PURCHASE_INCREMENT * 25);
@@ -1177,11 +1136,6 @@ contract ContestControllerTest is Test {
         uint256 u3Before = paymentToken.balanceOf(user3);
         vm.prank(user3);
         contest.claimSecondaryPayout(ENTRY_1);
-
-        if (contest.balanceOf(user1, ENTRY_1) > 0) {
-            vm.prank(user1);
-            contest.claimSecondaryPayout(ENTRY_1);
-        }
 
         assertEq(contest.totalSecondaryLiquidity(), 0);
         assertGt(paymentToken.balanceOf(user3), u3Before);

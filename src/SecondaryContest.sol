@@ -9,15 +9,11 @@ import "solady/utils/MerkleProofLib.sol";
  * @dev Library for managing secondary contest mechanics (Layer 2)
  */
 library SecondaryContest {
-    uint256 public constant BPS_DENOMINATOR = 10000;
-
     event SecondaryPositionAdded(
         address indexed participant,
         uint256 indexed entryId,
         uint256 amount,
-        uint256 participantTokensReceived,
-        uint256 primaryEntryInvestment,
-        uint256 ownerTokensReceived
+        uint256 participantTokensReceived
     );
     event SecondaryPositionSold(address indexed participant, uint256 indexed entryId, uint256 tokenAmount, uint256 proceeds);
     event SecondaryPayoutClaimed(address indexed participant, uint256 indexed entryId, uint256 payout);
@@ -81,14 +77,10 @@ library SecondaryContest {
         uint256 entryId,
         address participant,
         uint256 amount,
-        uint256 primaryEntryInvestment,
-        uint256 ownerTokensReceived,
         uint256 participantTokensReceived
     ) internal {
-        netPosition[entryId] += int256(ownerTokensReceived + participantTokensReceived);
-        emit SecondaryPositionAdded(
-            participant, entryId, amount, participantTokensReceived, primaryEntryInvestment, ownerTokensReceived
-        );
+        netPosition[entryId] += int256(participantTokensReceived);
+        emit SecondaryPositionAdded(participant, entryId, amount, participantTokensReceived);
     }
 
     function processRemoveSecondaryPosition(

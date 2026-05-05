@@ -15,7 +15,6 @@ contract ContestLifecycleE2E is Test {
     uint256 public constant PRIMARY_DEPOSIT = 25e18;
     uint256 public constant PURCHASE_INCREMENT = 10e18;
     uint256 public constant ORACLE_FEE_BPS = 500;
-    uint256 public constant PRIMARY_ENTRY_INVESTMENT_SHARE_BPS = 500;
     uint256 public constant ENTRY_1 = 1;
     uint256 public constant ENTRY_2 = 2;
     uint256 public constant EXPIRY_OFFSET = 365 days;
@@ -38,8 +37,7 @@ contract ContestLifecycleE2E is Test {
             oracle,
             PRIMARY_DEPOSIT,
             ORACLE_FEE_BPS,
-            block.timestamp + EXPIRY_OFFSET,
-            PRIMARY_ENTRY_INVESTMENT_SHARE_BPS
+            block.timestamp + EXPIRY_OFFSET
         );
         contest = ContestController(c);
         paymentToken.mint(u1, 1_000_000e18);
@@ -147,8 +145,7 @@ contract ContestLifecycleE2E is Test {
             oracle,
             PRIMARY_DEPOSIT,
             ORACLE_FEE_BPS,
-            block.timestamp + EXPIRY_OFFSET,
-            PRIMARY_ENTRY_INVESTMENT_SHARE_BPS
+            block.timestamp + EXPIRY_OFFSET
         );
         ContestController cPush = ContestController(cPushAddr);
         _primary(cPush, pushUser, ENTRY_1);
