@@ -1930,17 +1930,6 @@ contract ContestControllerTest is Test {
         assertGt(contest.getSecondarySideBalance(), 0);
     }
     
-    function test_getPrimarySideShareBps() public {
-        assertEq(contest.getPrimarySideShareBps(), 0);
-        
-        _createPrimaryEntry(user1, ENTRY_1);
-        _createSecondaryPosition(user2, ENTRY_1, PURCHASE_INCREMENT);
-        
-        uint256 share = contest.getPrimarySideShareBps();
-        assertGe(share, 0);
-        assertLe(share, 10000);
-    }
-    
     function test_calculateSecondaryPrice() public {
         uint256 price1 = contest.calculateSecondaryPrice(ENTRY_1);
         assertGt(price1, 0);
@@ -1957,7 +1946,7 @@ contract ContestControllerTest is Test {
         assertEq(contest.uri(ENTRY_2), "");
     }
     
-    // ============ Isolated markets (no cross-subsidy) ============
+    // ============ Primary pool unchanged by secondary trades ============
     
     function test_isolatedMarkets_SecondaryDoesNotChangePrimaryPool() public {
         _createPrimaryEntry(user1, ENTRY_1);

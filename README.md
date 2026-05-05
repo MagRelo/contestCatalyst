@@ -23,7 +23,7 @@ Why? By combining and balancing incentives, the system achieves more than either
 - **[ContestFactory](src/ContestFactory.sol)**: Factory for creating new contest instances
 - **[ContestController](src/ContestController.sol)**: Main orchestrator contract managing both layers
   - Handles state transitions (oracle-controlled)
-  - Manages prize pools and cross-subsidies
+  - Manages primary prize pool and per-entry secondary liquidity; adding secondary positions does not move tokens into or out of the primary pool until settlement and claims
 - **[PrimaryContest](src/PrimaryContest.sol)**: Library for primary mechanics (add/remove positions, claims)
 - **[SecondaryContest](src/SecondaryContest.sol)**: Library for secondary mechanics (position management, ERC1155 operations)
 - **[SecondaryPricing](src/SecondaryPricing.sol)**: Polynomial bonding curve pricing (`price = BASE_PRICE + COEFFICIENT * shares²`)
@@ -108,8 +108,7 @@ uint256 price = contest.calculateSecondaryPrice(entryId);
 
 // Balances
 uint256 primaryBalance = contest.getPrimarySideBalance();
-uint256 secondaryBalance = contest.getSecondarySideBalance();
-uint256 shareBps = contest.getPrimarySideShareBps();  // Primary share as basis points
+uint256 secondaryBalance = contest.getSecondarySideBalance(); // equals totalSecondaryLiquidity()
 
 // Entry enumeration
 uint256 count = contest.getEntriesCount();
@@ -135,14 +134,12 @@ Use the factory to create a new contest:
 
 ```solidity
 address contest = factory.createContest(
-    paymentToken,           // ERC20 token address (e.g., CUT)
-    oracle,                 // Oracle address (controls state)
-    contestantDepositAmount, // Fixed deposit for primary participants
-    oracleFee,              // Oracle fee in basis points (max 1000 = 10%)
-    expiry,                 // Expiration timestamp
-    positionBonusShareBps,  // Portion of subsidy to position bonuses (e.g., 5000 = 50%)
-    targetPrimaryShareBps,  // Target primary share for cross-subsidy balancing
-    maxCrossSubsidyBps      // Max cross-subsidy per deposit
+    paymentToken,                  // ERC20 token address (e.g., CUT)
+    oracle,                        // Oracle address (controls state)
+    contestantDepositAmount,       // Fixed deposit for primary participants
+    oracleFee,                     // Oracle fee in basis points (max 1000 = 10%)
+    expiry,                        // Expiration timestamp
+    primaryEntryInvestmentShareBps // BPS of each secondary buy for entry-owner curve leg, then remainder to buyer (0–10000)
 );
 ```
 
@@ -150,9 +147,7 @@ address contest = factory.createContest(
 
 - `paymentToken`: Address of ERC20 token (typically platform token)
 - `oracleFee`: 100 = 1% fee
-- `positionBonusShareBps`: 5000 = 50% of accumulated subsidy to bonuses
-- `targetPrimaryShareBps`: 5000 = target 50/50 split between pools
-- `maxCrossSubsidyBps`: 1000 = max 10% of deposit redirected
+- `primaryEntryInvestmentShareBps`: e.g. 500 = 5% of each secondary payment funds the entry owner’s bonding-curve leg before the buyer’s leg
 
 ## Testing Guide
 

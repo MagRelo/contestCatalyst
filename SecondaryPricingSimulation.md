@@ -136,7 +136,7 @@ forge test --match-path test/SecondaryPricingSimulation.t.sol -vvv
 
 ### Simulation Test Results
 
-The following tables show real-world simulation results from test runs with **current settings** (5% oracle fee, 5% primary entry investment carve to the owner’s curve leg, no cross-subsidy between primary prize pool and secondary collateral). These demonstrate how the polynomial bonding curve behaves in practice.
+The following tables show simulation results from test runs with **standard settings** (5% oracle fee on settled claims, 5% `primaryEntryInvestmentShareBps` owner curve leg on each secondary buy, primary deposits accruing only to `primaryPrizePool`). They illustrate how the polynomial bonding curve behaves in practice.
 
 #### Scenario 1: Sequential Equal Purchases
 
@@ -387,14 +387,9 @@ However, the implementation uses Simpson's rule for numerical integration, which
 - The bonding curve ensures price increases as demand (shares) increases
 - The scaling factors (`/ 1e9` and `/ 1e18`) in the implementation prevent overflow when dealing with large share values
 
-## Migration Notes
+## Model summary
 
-### Model
+- **Primary:** deposits accrue to `primaryPrizePool` until settlement claims.
+- **Secondary:** per-entry `secondaryLiquidityPerEntry` until settlement merge; minting uses the polynomial curve with an owner leg then buyer leg per `primaryEntryInvestmentShareBps`.
 
-- **Primary** deposits accrue only to `primaryPrizePool` (no cross-subsidy out).
-- **Secondary** uses per-entry liquidity (until settlement merge) plus the same polynomial curve for owner and buyer legs after the investment carve.
-- **Historical note**: Older docs referred to position bonuses and pool cross-subsidies; those mechanisms are removed.
-
-### Test Results
-
-Re-run `forge test --match-path test/SecondaryPricingSimulation.t.sol -vv` to refresh tables after economics or curve constants change.
+Re-run `forge test --match-path test/SecondaryPricingSimulation.t.sol -vv` to refresh tables after changing economics or curve constants.

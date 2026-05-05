@@ -22,7 +22,7 @@ import "solmate/tokens/ERC20.sol";
  * Contest Settings:
  * - Oracle fee: 5% (500 bps)
  * - Primary entry investment: 5% (500 bps) — owner-first curve leg on each secondary buy
- * - Isolated markets: no cross-subsidy between primary prize pool and secondary liquidity
+ * - Primary prize pool and secondary per-entry liquidity are accounted separately until settlement
  * 
  * Run with `forge test --match-path test/SecondaryPricingSimulation.t.sol -vv` to see console output
  * and manually review whether the pricing behavior feels fair and intuitive.

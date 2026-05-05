@@ -560,16 +560,6 @@ contract ContestController is ERC1155, ReentrancyGuard {
         return totalSecondaryLiquidity();
     }
 
-    function getPrimarySideShareBps() external view returns (uint256) {
-        uint256 p = primaryPrizePool;
-        uint256 s = totalSecondaryLiquidity();
-        uint256 t = p + s;
-        if (t == 0) {
-            return 0;
-        }
-        return (p * BPS_DENOMINATOR) / t;
-    }
-
     /// @notice Marginal bonding-curve price for `entryId` from current net ERC1155 supply
     function calculateSecondaryPrice(uint256 entryId) external view returns (uint256) {
         int256 np = netPosition[entryId];

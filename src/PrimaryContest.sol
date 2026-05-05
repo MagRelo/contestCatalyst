@@ -65,7 +65,7 @@ library PrimaryContest {
     }
 
     /**
-     * @notice Full primary deposit goes to primary prize pool (no cross-subsidy)
+     * @notice Full primary deposit is credited to the primary prize pool
      */
     function processAddPrimaryPosition(
         uint256[] storage entries,
