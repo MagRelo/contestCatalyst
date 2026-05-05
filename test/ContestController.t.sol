@@ -1767,6 +1767,7 @@ contract ContestControllerTest is Test {
     
     function test_pushPrimaryPayouts_EntryWithdrawn() public {
         _createPrimaryEntry(user1, ENTRY_1);
+        _createPrimaryEntry(user2, ENTRY_2);
         vm.prank(user1);
         contest.removePrimaryPosition(ENTRY_1);
         
@@ -1872,6 +1873,10 @@ contract ContestControllerTest is Test {
         
         _createPrimaryEntry(user2, ENTRY_2);
         assertEq(contest.getEntriesCount(), 2);
+
+        vm.prank(user1);
+        contest.removePrimaryPosition(ENTRY_1);
+        assertEq(contest.getEntriesCount(), 1);
     }
     
     function test_getEntryAtIndex() public {
@@ -1883,6 +1888,31 @@ contract ContestControllerTest is Test {
         
         vm.expectRevert("Invalid index");
         contest.getEntryAtIndex(2);
+    }
+
+    function test_getEntryAtIndex_AfterRemoveAndReAdd_NoDuplicate() public {
+        _createPrimaryEntry(user1, ENTRY_1);
+        _createPrimaryEntry(user2, ENTRY_2);
+        assertEq(contest.getEntriesCount(), 2);
+
+        vm.prank(user1);
+        contest.removePrimaryPosition(ENTRY_1);
+
+        assertEq(contest.getEntriesCount(), 1);
+        assertEq(contest.getEntryAtIndex(0), ENTRY_2);
+        vm.expectRevert("Invalid index");
+        contest.getEntryAtIndex(1);
+
+        _createPrimaryEntry(user1, ENTRY_1);
+        assertEq(contest.getEntriesCount(), 2);
+
+        uint256 first = contest.getEntryAtIndex(0);
+        uint256 second = contest.getEntryAtIndex(1);
+        assertTrue(first != second, "entries should be unique");
+        assertTrue(
+            (first == ENTRY_1 && second == ENTRY_2) || (first == ENTRY_2 && second == ENTRY_1),
+            "expected active entries are missing"
+        );
     }
     
     function test_getPrimarySideBalance() public {
@@ -2346,8 +2376,8 @@ contract ContestControllerTest is Test {
         vm.prank(user2);
         contest.removePrimaryPosition(ENTRY_2);
         
-        // Entries array is not cleared, but owners are set to address(0)
-        assertEq(contest.getEntriesCount(), 2);
+        // Active entries are removed from enumeration on withdraw.
+        assertEq(contest.getEntriesCount(), 0);
         assertEq(contest.entryOwner(ENTRY_1), address(0));
         assertEq(contest.entryOwner(ENTRY_2), address(0));
     }

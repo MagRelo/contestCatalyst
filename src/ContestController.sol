@@ -47,6 +47,8 @@ contract ContestController is ERC1155, ReentrancyGuard {
     uint256 public accumulatedOracleFee;
 
     uint256[] public entries;
+    /// @dev Index in `entries` plus one; zero means not currently active.
+    mapping(uint256 => uint256) private entryIndexPlusOne;
     mapping(uint256 => address) public entryOwner;
     uint256 public primaryPrizePool;
     mapping(uint256 => uint256) public primaryPrizePoolPayouts;
@@ -120,8 +122,10 @@ contract ContestController is ERC1155, ReentrancyGuard {
     function addPrimaryPosition(uint256 entryId, bytes32[] calldata merkleProof) external nonReentrant {
         PrimaryContest.validatePrimaryMerkleProof(primaryMerkleRoot, msg.sender, merkleProof);
         PrimaryContest.validateAddPrimaryPosition(entryOwner, entryId, expiryTimestamp, uint8(state));
+        require(entryIndexPlusOne[entryId] == 0, "Entry already active");
 
         PrimaryContest.processAddPrimaryPosition(entries, entryOwner, entryId, msg.sender, primaryDepositAmount);
+        entryIndexPlusOne[entryId] = entries.length;
 
         primaryPrizePool += primaryDepositAmount;
 
@@ -133,6 +137,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
 
         (uint256 refundAmount, uint256 primaryContribution) =
             PrimaryContest.processRemovePrimaryPosition(entryOwner, entryId, primaryDepositAmount);
+        _removeActiveEntry(entryId);
 
         primaryPrizePool -= primaryContribution;
 
@@ -521,6 +526,23 @@ contract ContestController is ERC1155, ReentrancyGuard {
     function getEntryAtIndex(uint256 index) external view returns (uint256) {
         require(index < entries.length, "Invalid index");
         return entries[index];
+    }
+
+    function _removeActiveEntry(uint256 entryId) internal {
+        uint256 idxPlusOne = entryIndexPlusOne[entryId];
+        require(idxPlusOne != 0, "Entry not active");
+
+        uint256 idx = idxPlusOne - 1;
+        uint256 lastIdx = entries.length - 1;
+
+        if (idx != lastIdx) {
+            uint256 movedEntryId = entries[lastIdx];
+            entries[idx] = movedEntryId;
+            entryIndexPlusOne[movedEntryId] = idx + 1;
+        }
+
+        entries.pop();
+        entryIndexPlusOne[entryId] = 0;
     }
 
     /// @notice Sum of secondaryLiquidityPerEntry over all primary entries
