@@ -8,6 +8,8 @@ import "solmate/utils/SafeTransferLib.sol";
 import "./PrimaryContest.sol";
 import "./SecondaryContest.sol";
 import "./SecondaryPricing.sol";
+import "referralTree/interfaces/IRewardDistributor.sol";
+import "referralTree/interfaces/IReferralGraph.sol";
 
 interface IERC20Balance {
     function balanceOf(address account) external view returns (uint256);
@@ -24,13 +26,17 @@ interface IERC20Balance {
  *      if there is no supply on the winning entry). Each secondary buy credits liquidity and mints ERC1155 to the caller per the bonding curve from the entry's current nonnegative supply.
  */
 contract ContestController is ERC1155, ReentrancyGuard {
+    address public constant REFERRAL_ROOT = address(0x0000000000000000000000000000000000000001);
+
     address public immutable paymentToken;
     address public immutable oracle;
     uint256 public immutable primaryDepositAmount;
-    uint256 public immutable oracleFeeBps;
+    uint256 public immutable referralNetworkBps;
     uint256 public immutable expiryTimestamp;
     /// @notice BPS of each primary deposit credited to `secondaryPrimarySubsidyPerEntry` (no ERC1155 mint)
     uint256 public immutable primaryDepositSecondarySubsidyBps;
+    address public immutable rewardDistributor;
+    bytes32 public immutable referralGroupId;
 
     uint256 public constant BPS_DENOMINATOR = 10000;
     uint256 public constant PRICE_PRECISION = 1e6;
@@ -45,7 +51,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
     }
 
     ContestState public state;
-    uint256 public accumulatedOracleFee;
+    uint256 public referralSettlementNonce;
 
     uint256[] public entries;
     /// @dev Index in `entries` plus one; zero means not currently active.
@@ -92,6 +98,11 @@ contract ContestController is ERC1155, ReentrancyGuard {
     event ContestCancelled();
     event ContestClosed();
 
+    event ReferralNetworkFeeDistributed(
+        address indexed winner, address indexed payoutAnchor, uint256 amount, bytes32 eventId
+    );
+    event ReferralNetworkFeeToOracle(address indexed winner, uint256 amount);
+
     modifier onlyOracle() {
         require(msg.sender == oracle, "Not oracle");
         _;
@@ -101,22 +112,27 @@ contract ContestController is ERC1155, ReentrancyGuard {
         address _paymentToken,
         address _oracle,
         uint256 _primaryDepositAmount,
-        uint256 _oracleFeeBps,
+        uint256 _referralNetworkBps,
         uint256 _expiryTimestamp,
-        uint256 _primaryDepositSecondarySubsidyBps
+        uint256 _primaryDepositSecondarySubsidyBps,
+        address _rewardDistributor,
+        bytes32 _referralGroupId
     ) ERC1155() {
         require(_paymentToken != address(0), "Invalid payment token");
         require(_oracle != address(0), "Invalid oracle");
-        require(_oracleFeeBps <= 1000, "Oracle fee too high");
+        require(_referralNetworkBps <= 1000, "Referral network fee too high");
         require(_expiryTimestamp > block.timestamp, "Expiry in past");
         require(_primaryDepositSecondarySubsidyBps <= BPS_DENOMINATOR, "Subsidy bps too high");
+        require(_rewardDistributor != address(0), "Invalid reward distributor");
 
         paymentToken = _paymentToken;
         oracle = _oracle;
         primaryDepositAmount = _primaryDepositAmount;
-        oracleFeeBps = _oracleFeeBps;
+        referralNetworkBps = _referralNetworkBps;
         expiryTimestamp = _expiryTimestamp;
         primaryDepositSecondarySubsidyBps = _primaryDepositSecondarySubsidyBps;
+        rewardDistributor = _rewardDistributor;
+        referralGroupId = _referralGroupId;
 
         state = ContestState.OPEN;
     }
@@ -165,14 +181,8 @@ contract ContestController is ERC1155, ReentrancyGuard {
             primaryPrizePool = 0;
         }
 
-        uint256 oracleFee = _calculateOracleFee(payout);
-        uint256 netClaim = payout - oracleFee;
-        if (oracleFee > 0) {
-            accumulatedOracleFee += oracleFee;
-        }
-
-        SafeTransferLib.safeTransfer(ERC20(paymentToken), msg.sender, netClaim);
-        emit PrimaryPayoutClaimed(msg.sender, entryId, netClaim);
+        SafeTransferLib.safeTransfer(ERC20(paymentToken), msg.sender, payout);
+        emit PrimaryPayoutClaimed(msg.sender, entryId, payout);
     }
 
     function addSecondaryPosition(uint256 entryId, uint256 amount, bytes32[] calldata merkleProof)
@@ -217,8 +227,6 @@ contract ContestController is ERC1155, ReentrancyGuard {
             cashOut = available;
         }
 
-        // Reduce attributed invested principal pro-rata to tokens being sold.
-        // This is UI accounting only; sale proceeds are still derived from on-chain liquidity.
         uint256 depositedOnEntry = secondaryDepositedPerEntry[msg.sender][entryId];
         if (depositedOnEntry > 0) {
             uint256 principalToForfeit = (depositedOnEntry * tokenAmount) / userBal;
@@ -265,7 +273,6 @@ contract ContestController is ERC1155, ReentrancyGuard {
         _burn(msg.sender, entryId, balance);
         netPosition[entryId] -= int256(balance);
 
-        // Buyer sold/cashed out all their remaining tokens for this entry.
         secondaryDepositedPerEntry[msg.sender][entryId] = 0;
 
         if (payout > 0) {
@@ -274,24 +281,17 @@ contract ContestController is ERC1155, ReentrancyGuard {
             } else {
                 secondaryLiquidityPerEntry[entryId] = 0;
             }
-
-            uint256 oracleFee = _calculateOracleFee(payout);
-            uint256 netPayout = payout - oracleFee;
-            if (oracleFee > 0) {
-                accumulatedOracleFee += oracleFee;
-            }
-            SafeTransferLib.safeTransfer(ERC20(paymentToken), msg.sender, netPayout);
-            emit SecondaryPayoutClaimed(msg.sender, entryId, netPayout);
+            SafeTransferLib.safeTransfer(ERC20(paymentToken), msg.sender, payout);
+            emit SecondaryPayoutClaimed(msg.sender, entryId, payout);
         } else {
             emit SecondaryPayoutClaimed(msg.sender, entryId, 0);
         }
 
         if (uint256(netPosition[entryId]) == 0) {
             uint256 remaining = IERC20Balance(paymentToken).balanceOf(address(this));
-            uint256 sweepable = remaining > accumulatedOracleFee ? remaining - accumulatedOracleFee : 0;
-            if (sweepable > 0) {
+            if (remaining > 0) {
                 secondaryLiquidityPerEntry[entryId] = 0;
-                SafeTransferLib.safeTransfer(ERC20(paymentToken), msg.sender, sweepable);
+                SafeTransferLib.safeTransfer(ERC20(paymentToken), msg.sender, remaining);
             }
         }
     }
@@ -309,11 +309,12 @@ contract ContestController is ERC1155, ReentrancyGuard {
         emit ContestLocked();
     }
 
-    function settleContest(uint256[] calldata winningEntries, uint256[] calldata payoutBps)
-        external
-        onlyOracle
-        nonReentrant
-    {
+    function settleContest(
+        uint256[] calldata winningEntries,
+        uint256[] calldata payoutBps,
+        IRewardDistributor.ChainRewardData calldata referralReward,
+        bytes calldata referralSignature
+    ) external onlyOracle nonReentrant {
         require(state == ContestState.ACTIVE || state == ContestState.LOCKED, "Contest not active or locked");
         require(winningEntries.length > 0, "Must have at least one winner");
         require(winningEntries.length == payoutBps.length, "Array length mismatch");
@@ -326,26 +327,68 @@ contract ContestController is ERC1155, ReentrancyGuard {
         }
         require(totalBps == BPS_DENOMINATOR, "Payouts must sum to 100%");
 
+        uint256 totalPrimary = primaryPrizePool;
+        uint256 totalSecondary;
+        for (uint256 j = 0; j < entries.length; j++) {
+            uint256 eid = entries[j];
+            totalSecondary += secondaryLiquidityPerEntry[eid] + secondaryPrimarySubsidyPerEntry[eid];
+        }
+        uint256 totalGross = totalPrimary + totalSecondary;
+
+        uint256 referralFee;
+        uint256 netBps = BPS_DENOMINATOR;
+        if (referralNetworkBps > 0 && totalGross > 0) {
+            referralFee = (totalGross * referralNetworkBps) / BPS_DENOMINATOR;
+            netBps = BPS_DENOMINATOR - referralNetworkBps;
+        }
+        uint256 netPrimary = (totalPrimary * netBps) / BPS_DENOMINATOR;
+        uint256 netSecondary = (totalSecondary * netBps) / BPS_DENOMINATOR;
+
+        if (referralFee > 0) {
+            address winner = entryOwner[winningEntries[0]];
+            require(winner != address(0), "Invalid winner");
+
+            IReferralGraph referralGraph =
+                IRewardDistributor(rewardDistributor).getReferralGraph();
+            address payoutAnchor = referralGraph.getReferrer(winner, referralGroupId);
+
+            if (payoutAnchor != address(0) && payoutAnchor != REFERRAL_ROOT) {
+                require(referralReward.totalAmount == referralFee, "Referral amount mismatch");
+                require(referralReward.user == payoutAnchor, "Referral user mismatch");
+                require(referralReward.rewardToken == paymentToken, "Referral token mismatch");
+                require(referralReward.groupId == referralGroupId, "Referral group mismatch");
+                require(referralReward.timestamp == block.timestamp, "Referral timestamp mismatch");
+                require(referralReward.nonce == referralSettlementNonce, "Referral nonce mismatch");
+
+                SafeTransferLib.safeTransfer(ERC20(paymentToken), rewardDistributor, referralFee);
+                IRewardDistributor(rewardDistributor).distributeChainRewards(referralReward, referralSignature);
+                referralSettlementNonce++;
+
+                emit ReferralNetworkFeeDistributed(winner, payoutAnchor, referralFee, referralReward.eventId);
+            } else {
+                SafeTransferLib.safeTransfer(ERC20(paymentToken), oracle, referralFee);
+                emit ReferralNetworkFeeToOracle(winner, referralFee);
+            }
+        }
+
         state = ContestState.SETTLED;
 
-        uint256 layer1Pool = primaryPrizePool;
+        primaryPrizePool = netPrimary;
         for (uint256 i = 0; i < winningEntries.length; i++) {
             uint256 entryId = winningEntries[i];
-            uint256 payout = (layer1Pool * payoutBps[i]) / BPS_DENOMINATOR;
+            uint256 payout = (netPrimary * payoutBps[i]) / BPS_DENOMINATOR;
             primaryPrizePoolPayouts[entryId] = payout;
         }
 
         secondaryWinningEntry = winningEntries[0];
         secondaryMarketResolved = true;
 
-        uint256 aggregatedSecondary;
-        for (uint256 j = 0; j < entries.length; j++) {
-            uint256 eid = entries[j];
-            aggregatedSecondary += secondaryLiquidityPerEntry[eid] + secondaryPrimarySubsidyPerEntry[eid];
+        for (uint256 k = 0; k < entries.length; k++) {
+            uint256 eid = entries[k];
             secondaryLiquidityPerEntry[eid] = 0;
             secondaryPrimarySubsidyPerEntry[eid] = 0;
         }
-        secondaryLiquidityPerEntry[secondaryWinningEntry] = aggregatedSecondary;
+        secondaryLiquidityPerEntry[secondaryWinningEntry] = netSecondary;
 
         uint256 winnerSupply = uint256(netPosition[secondaryWinningEntry]);
         uint256 winnerLiq = secondaryLiquidityPerEntry[secondaryWinningEntry];
@@ -381,7 +424,6 @@ contract ContestController is ERC1155, ReentrancyGuard {
         uint256 remaining = IERC20Balance(paymentToken).balanceOf(address(this));
         if (remaining > 0) {
             primaryPrizePool = 0;
-            accumulatedOracleFee = 0;
             for (uint256 i = 0; i < entries.length; i++) {
                 uint256 eid = entries[i];
                 secondaryLiquidityPerEntry[eid] = 0;
@@ -392,15 +434,6 @@ contract ContestController is ERC1155, ReentrancyGuard {
             SafeTransferLib.safeTransfer(ERC20(paymentToken), oracle, remaining);
             emit ContestClosed();
         }
-    }
-
-    function claimOracleFee() external nonReentrant {
-        require(msg.sender == oracle, "Not oracle");
-        require(accumulatedOracleFee > 0, "No fee to claim");
-
-        uint256 fee = accumulatedOracleFee;
-        accumulatedOracleFee = 0;
-        SafeTransferLib.safeTransfer(ERC20(paymentToken), oracle, fee);
     }
 
     function setPrimaryMerkleRoot(bytes32 _root) external onlyOracle {
@@ -418,10 +451,6 @@ contract ContestController is ERC1155, ReentrancyGuard {
         require(state != ContestState.SETTLED && state != ContestState.CLOSED, "Already settled");
         state = ContestState.CANCELLED;
         emit ContestCancelled();
-    }
-
-    function _calculateOracleFee(uint256 amount) internal view returns (uint256 fee) {
-        fee = (amount * oracleFeeBps) / BPS_DENOMINATOR;
     }
 
     /// @return toPrimaryPool Portion of `deposit` credited to `primaryPrizePool` on add (reversed on remove)
@@ -452,13 +481,8 @@ contract ContestController is ERC1155, ReentrancyGuard {
                 primaryPrizePool = 0;
             }
 
-            uint256 oracleFee = _calculateOracleFee(payout);
-            uint256 netClaim = payout - oracleFee;
-            if (oracleFee > 0) {
-                accumulatedOracleFee += oracleFee;
-            }
-            SafeTransferLib.safeTransfer(ERC20(paymentToken), owner, netClaim);
-            emit PrimaryPayoutClaimed(owner, entryId, netClaim);
+            SafeTransferLib.safeTransfer(ERC20(paymentToken), owner, payout);
+            emit PrimaryPayoutClaimed(owner, entryId, payout);
         }
     }
 
@@ -485,7 +509,6 @@ contract ContestController is ERC1155, ReentrancyGuard {
                 _burn(participant, entryId, bal);
                 netPosition[entryId] -= int256(bal);
 
-                // Participants cashed out all their remaining tokens for this entry.
                 secondaryDepositedPerEntry[participant][entryId] = 0;
 
                 if (payout > 0) {
@@ -495,13 +518,8 @@ contract ContestController is ERC1155, ReentrancyGuard {
                         secondaryLiquidityPerEntry[entryId] = 0;
                     }
 
-                    uint256 oracleFee = _calculateOracleFee(payout);
-                    uint256 netPayout = payout - oracleFee;
-                    if (oracleFee > 0) {
-                        accumulatedOracleFee += oracleFee;
-                    }
-                    SafeTransferLib.safeTransfer(ERC20(paymentToken), participant, netPayout);
-                    emit SecondaryPayoutClaimed(participant, entryId, netPayout);
+                    SafeTransferLib.safeTransfer(ERC20(paymentToken), participant, payout);
+                    emit SecondaryPayoutClaimed(participant, entryId, payout);
                 }
             }
         }

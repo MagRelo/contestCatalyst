@@ -4,9 +4,7 @@ Replace claim-time oracle fees with settlement-time referral network fees (`refe
 
 ## Current vs Target Behavior
 
-**Today:** [`ContestController.sol`](src/ContestController.sol) skims `oracleFeeBps` (5%) on every `claim*` / `push*` payout, accumulates it in `accumulatedOracleFee`, and the oracle withdraws via `claimOracleFee()`.
-
-**Target:** Rename to `referralNetworkBps`, deduct the fee once at settlement from total distributable TVL, and distribute through referralTree when the winner has a real referrer; otherwise send the fee to `oracle`. Claims/pushes pay **full net amounts** with no further fee deduction.
+**Implemented:** [`ContestController.sol`](src/ContestController.sol) uses `referralNetworkBps` (5% standard), deducts the fee once at settlement from total distributable TVL, and distributes through referralTree when the winner has a real referrer; otherwise sends the fee to `oracle`. Claims/pushes pay **full net amounts** with no further fee deduction. Per-contest `rewardDistributor` and `referralGroupId` are set on `createContest`.
 
 ```mermaid
 sequenceDiagram
@@ -32,16 +30,16 @@ sequenceDiagram
 
 ## Recommended Deployment Model (default)
 
-Use a **single platform-wide deployment** configured on the factory:
+Use a **shared platform `ReferralGraph` + `RewardDistributor`**, but configure each contest at **creation** (not on the factory):
 
-| Component                          | Role                                                                  |
-| ---------------------------------- | --------------------------------------------------------------------- |
-| `ReferralGraph`                    | Shared referral tree (oracle registers users before/during contests)  |
-| `RewardDistributor`                | Shared distributor; contest oracle must be authorized to sign rewards |
-| `ContestFactory.rewardDistributor` | Immutable reference injected into every new contest                   |
-| `ContestFactory.referralGroupId`   | Platform-wide `bytes32` (e.g. `keccak256("contest-catalyst-v1")`)     |
+| Component                               | Role                                                                  |
+| --------------------------------------- | --------------------------------------------------------------------- |
+| `ReferralGraph`                         | Shared referral tree (oracle registers users before/during contests)  |
+| `RewardDistributor`                     | Shared distributor; contest oracle must be authorized to sign rewards |
+| `ContestController.rewardDistributor`   | Per-contest immutable, passed into `createContest`                    |
+| `ContestController.referralGroupId`     | Per-contest immutable `bytes32` (e.g. `keccak256("contest-catalyst-v1")`) |
 
-Rationale: referralTree is designed as shared infrastructure; one graph lets referrers earn across all contests. Per-contest `groupId` is possible later but adds registration complexity without clear benefit now.
+Rationale: referralTree is designed as shared infrastructure; one graph lets referrers earn across all contests. Passing distributor + `groupId` on `createContest` matches other per-contest settings (`paymentToken`, `oracle`) and allows different `groupId` per contest without redeploying the factory. In practice, the backend can pass the same two values for every contest.
 
 ## Core Contract Changes
 
@@ -61,8 +59,8 @@ Import interfaces only: `referralTree/interfaces/IRewardDistributor.sol` and `re
 
 ### 2. [`ContestFactory.sol`](src/ContestFactory.sol)
 
-- Add immutable constructor params: `address rewardDistributor`, `bytes32 referralGroupId`
 - Rename `createContest` arg `oracleFee` → `referralNetworkBps`
+- Add `createContest` args: `address rewardDistributor`, `bytes32 referralGroupId` (no factory-level referral immutables)
 - Pass new params through to `ContestController` constructor
 
 ### 3. [`ContestController.sol`](src/ContestController.sol)
@@ -155,7 +153,7 @@ Before calling `settleContest`, the oracle must:
    - `user`: `payoutAnchor` (winner's referrer — **not** the winner)
    - `totalAmount`: computed `referralFee`
    - `rewardToken`: contest `paymentToken`
-   - `groupId`: factory `referralGroupId`
+   - `groupId`: contest `referralGroupId`
    - `eventId`: unique per settlement (recommend `keccak256(abi.encodePacked(contestAddress, nonce))`)
    - `timestamp`: intended `block.timestamp` (oracle submits tx promptly)
    - `nonce`: monotonic per contest (pass via calldata; contract can store `referralSettlementNonce` to prevent replay)
@@ -212,14 +210,20 @@ Example: 2 primary entries ($25 each, 7% subsidy) + $100 secondary → gross TVL
 
 - Automatic `ReferralGraph.register` on primary deposit (requires oracle/backend integration)
 - Frontend / SDK for signing `ChainRewardData`
-- Per-contest `groupId` or host-based lookup (winner still used only for `getReferrer` lookup, not as payout recipient)
+- Host-based lookup other than winner-as-key (winner still used only for `getReferrer` lookup, not as payout recipient)
+- Factory allowlist of `rewardDistributor` addresses
 - referralTree fork adding `excludeTriggerUserFromPayout` (not needed — referrer-as-`user` works with current API)
+
+## Off-chain recording (cut / indexers)
+
+- Primary and secondary participant payouts: still index `PrimaryPayoutClaimed` / `SecondaryPayoutClaimed` from push/claim txs (full net amounts).
+- Referral network fee: index on the **settlement tx** — `ChainRewardsDistributed` on `rewardDistributor` for per-referrer splits, or `ReferralNetworkFeeToOracle` on the contest when the winner has no payable chain.
 
 ## Implementation Checklist
 
-- [ ] Add referralTree forge dependency, remapping, and `IRewardDistributor` / `IReferralGraph` imports
-- [ ] Update ContestFactory with rewardDistributor, referralGroupId, and referralNetworkBps param
-- [ ] Refactor ContestController: settlement-time fee deduction; anchor `ChainRewardData.user` to winner's referrer; oracle fallback when unregistered; remove claim-time fees and claimOracleFee
-- [ ] Add test harness: deploy ReferralGraph/RewardDistributor, referral chain setup, signing helper
-- [ ] Update all existing tests and add referral distribution / revert coverage
-- [ ] Update agents.md, README.md, SecondaryPricingBreakeven.md for referralNetworkBps and settlement flow
+- [x] Add referralTree forge dependency, remapping, and `IRewardDistributor` / `IReferralGraph` imports
+- [x] Update ContestFactory createContest with rewardDistributor, referralGroupId, and referralNetworkBps params
+- [x] Refactor ContestController: settlement-time fee deduction; anchor `ChainRewardData.user` to winner's referrer; oracle fallback when unregistered; remove claim-time fees and claimOracleFee
+- [x] Add test harness: deploy ReferralGraph/RewardDistributor, referral chain setup, signing helper
+- [x] Update all existing tests and add referral distribution / revert coverage
+- [x] Update agents.md, README.md, SecondaryPricingBreakeven.md for referralNetworkBps and settlement flow

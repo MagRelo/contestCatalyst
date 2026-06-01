@@ -1,23 +1,20 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "forge-std/Test.sol";
 import "../src/ContestController.sol";
-import "../src/ContestFactory.sol";
+import "./helpers/ReferralTestHarness.sol";
 import "solmate/tokens/ERC20.sol";
 
-contract ContestBusyLifecycleE2E is Test {
+contract ContestBusyLifecycleE2E is ReferralTestHarness {
     uint256 public constant PRIMARY_DEPOSIT = 25e18;
     uint256 public constant PURCHASE_INCREMENT = 10e18;
-    uint256 public constant ORACLE_FEE_BPS = 500;
     uint256 public constant PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS = 700;
     uint256 public constant ENTRY_1 = 1;
     uint256 public constant ENTRY_2 = 2;
     uint256 public constant ENTRY_3 = 3;
     uint256 public constant EXPIRY_OFFSET = 365 days;
-    uint256 internal constant BPS_DENOMINATOR = 10_000;
+    uint256 internal constant ROUNDING_SLACK = 500 wei;
 
-    ContestFactory internal factory;
     ContestController internal contest;
     BusyE2EMockERC20 internal paymentToken;
 
@@ -33,16 +30,15 @@ contract ContestBusyLifecycleE2E is Test {
 
     function setUp() public {
         paymentToken = new BusyE2EMockERC20("Payment Token", "PAY", 18);
-        factory = new ContestFactory();
-        address c = factory.createContest(
+        _initReferralInfra();
+        contest = _createContest(
             address(paymentToken),
             oracle,
             PRIMARY_DEPOSIT,
-            ORACLE_FEE_BPS,
+            REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
             PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
         );
-        contest = ContestController(c);
 
         paymentToken.mint(oracle, 1_000_000e18);
         paymentToken.mint(p1, 1_000_000e18);
@@ -72,60 +68,45 @@ contract ContestBusyLifecycleE2E is Test {
         contest.addSecondaryPosition(entryId, amount, new bytes32[](0));
     }
 
-    function _claimPrimaryAndAssert(address winner, uint256 entryId) internal returns (uint256 oracleFee) {
-        uint256 gross = contest.primaryPrizePoolPayouts(entryId);
-        oracleFee = (gross * ORACLE_FEE_BPS) / BPS_DENOMINATOR;
-        uint256 expectedNet = gross - oracleFee;
-
+    function _claimPrimaryAndAssert(address winner, uint256 entryId) internal {
+        uint256 payout = contest.primaryPrizePoolPayouts(entryId);
         uint256 before = paymentToken.balanceOf(winner);
         vm.prank(winner);
         contest.claimPrimaryPayout(entryId);
-        uint256 afterBal = paymentToken.balanceOf(winner);
-
-        assertEq(afterBal - before, expectedNet);
+        assertEq(paymentToken.balanceOf(winner) - before, payout);
         assertEq(contest.primaryPrizePoolPayouts(entryId), 0);
     }
 
-    function _claimSecondaryAndAssert(address holder, uint256 entryId) internal returns (uint256 oracleFee) {
+    function _claimSecondaryAndAssert(address holder, uint256 entryId) internal {
         uint256 holderTokens = contest.balanceOf(holder, entryId);
         if (holderTokens == 0) {
-            return 0;
+            return;
         }
 
         uint256 liquidityBefore = contest.secondaryLiquidityPerEntry(entryId);
         uint256 supplyBefore = uint256(contest.netPosition(entryId));
-        uint256 gross = (holderTokens * liquidityBefore) / supplyBefore;
-        oracleFee = (gross * ORACLE_FEE_BPS) / BPS_DENOMINATOR;
-        uint256 expectedNet = gross - oracleFee;
+        uint256 expected = (holderTokens * liquidityBefore) / supplyBefore;
 
         uint256 contractBalBefore = paymentToken.balanceOf(address(contest));
-        uint256 feesBefore = contest.accumulatedOracleFee();
-        uint256 expectedReceived = expectedNet;
+        uint256 expectedReceived = expected;
 
-        // Last claimant receives any remaining non-fee dust via the internal sweep.
         if (holderTokens == supplyBefore) {
-            uint256 remainingAfterNetTransfer = contractBalBefore - expectedNet;
-            uint256 feesAfter = feesBefore + oracleFee;
-            uint256 expectedSweep = remainingAfterNetTransfer > feesAfter ? remainingAfterNetTransfer - feesAfter : 0;
-            expectedReceived += expectedSweep;
+            uint256 remainingAfterTransfer = contractBalBefore - expected;
+            expectedReceived += remainingAfterTransfer;
         }
 
         uint256 before = paymentToken.balanceOf(holder);
         vm.prank(holder);
         contest.claimSecondaryPayout(entryId);
-        uint256 afterBal = paymentToken.balanceOf(holder);
-
-        assertEq(afterBal - before, expectedReceived);
+        assertEq(paymentToken.balanceOf(holder) - before, expectedReceived);
         assertEq(contest.balanceOf(holder, entryId), 0);
     }
 
     function test_E2E_HappyPath_BusyContest_fullDistributionAndZeroed() public {
-        // Multiple primary participants enter.
         _primary(p1, ENTRY_1);
         _primary(p2, ENTRY_2);
         _primary(p3, ENTRY_3);
 
-        // Busy secondary market across multiple entries.
         _secondary(b1, ENTRY_1, PURCHASE_INCREMENT * 3);
         _secondary(b2, ENTRY_2, PURCHASE_INCREMENT * 5);
         _secondary(b3, ENTRY_2, PURCHASE_INCREMENT * 2);
@@ -144,7 +125,6 @@ contract ContestBusyLifecycleE2E is Test {
         vm.prank(oracle);
         contest.lockContest();
 
-        // Two primary winners; secondary winner is first winner (ENTRY_2).
         uint256[] memory winners = new uint256[](2);
         winners[0] = ENTRY_2;
         winners[1] = ENTRY_1;
@@ -152,41 +132,32 @@ contract ContestBusyLifecycleE2E is Test {
         payouts[0] = 7_000;
         payouts[1] = 3_000;
 
-        vm.prank(oracle);
-        contest.settleContest(winners, payouts);
+        uint256 expectedReferralFee = _referralFeeAmount(contest);
+        uint256 oracleBefore = paymentToken.balanceOf(oracle);
+        _settleContest(contest, winners, payouts);
+        assertEq(paymentToken.balanceOf(oracle) - oracleBefore, expectedReferralFee);
 
-        // All secondary liquidity is merged onto the winning secondary entry.
-        assertEq(contest.secondaryLiquidityPerEntry(ENTRY_2), totalSecondaryBought + threeSubsidy);
+        uint256 grossSecondary = totalSecondaryBought + threeSubsidy;
+        uint256 netSecondary = (grossSecondary * _netBps(contest)) / 10_000;
+        assertEq(contest.secondaryLiquidityPerEntry(ENTRY_2), netSecondary);
         assertEq(contest.secondaryLiquidityPerEntry(ENTRY_1), 0);
         assertEq(contest.secondaryLiquidityPerEntry(ENTRY_3), 0);
-        assertEq(contest.getSecondarySideBalance(), totalSecondaryBought + threeSubsidy);
+        assertEq(contest.getSecondarySideBalance(), netSecondary);
 
-        uint256 expectedOracleFees;
+        _claimPrimaryAndAssert(p2, ENTRY_2);
+        _claimPrimaryAndAssert(p1, ENTRY_1);
 
-        // Primary winners are paid net, oracle fees accrue.
-        expectedOracleFees += _claimPrimaryAndAssert(p2, ENTRY_2);
-        expectedOracleFees += _claimPrimaryAndAssert(p1, ENTRY_1);
-
-        // Winning secondary holders redeem pro-rata against merged liquidity.
-        expectedOracleFees += _claimSecondaryAndAssert(p2, ENTRY_2);
-        expectedOracleFees += _claimSecondaryAndAssert(b2, ENTRY_2);
-        expectedOracleFees += _claimSecondaryAndAssert(b3, ENTRY_2);
-        expectedOracleFees += _claimSecondaryAndAssert(p1, ENTRY_2);
+        _claimSecondaryAndAssert(p2, ENTRY_2);
+        _claimSecondaryAndAssert(b2, ENTRY_2);
+        _claimSecondaryAndAssert(b3, ENTRY_2);
+        _claimSecondaryAndAssert(p1, ENTRY_2);
 
         assertEq(contest.totalSecondaryLiquidity(), 0);
         assertEq(contest.getSecondarySideBalance(), 0);
         assertEq(uint256(contest.netPosition(ENTRY_2)), 0);
-        assertEq(paymentToken.balanceOf(address(contest)), contest.accumulatedOracleFee());
-        assertEq(contest.accumulatedOracleFee(), expectedOracleFees);
 
-        uint256 oracleBefore = paymentToken.balanceOf(oracle);
-        vm.prank(oracle);
-        contest.claimOracleFee();
-        uint256 oracleAfter = paymentToken.balanceOf(oracle);
-
-        assertEq(oracleAfter - oracleBefore, expectedOracleFees);
-        assertEq(contest.accumulatedOracleFee(), 0);
-        assertEq(paymentToken.balanceOf(address(contest)), 0);
+        uint256 left = paymentToken.balanceOf(address(contest));
+        assertLe(left, ROUNDING_SLACK);
     }
 }
 

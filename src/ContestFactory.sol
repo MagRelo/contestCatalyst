@@ -17,17 +17,21 @@ contract ContestFactory {
         address paymentToken,
         address oracle,
         uint256 contestantDepositAmount,
-        uint256 oracleFee,
+        uint256 referralNetworkBps,
         uint256 expiry,
-        uint256 primaryDepositSecondarySubsidyBps
+        uint256 primaryDepositSecondarySubsidyBps,
+        address rewardDistributor,
+        bytes32 referralGroupId
     ) external returns (address) {
         ContestController contest = new ContestController(
             paymentToken,
             oracle,
             contestantDepositAmount,
-            oracleFee,
+            referralNetworkBps,
             expiry,
-            primaryDepositSecondarySubsidyBps
+            primaryDepositSecondarySubsidyBps,
+            rewardDistributor,
+            referralGroupId
         );
 
         address contestAddress = address(contest);

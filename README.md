@@ -46,8 +46,8 @@ CANCELLED ←───────┘
 **Note on Cancellation & Expiry:**
 
 - Anyone can call `cancelExpired()` if the contest has passed its expiry timestamp and is not `SETTLED` or `CLOSED`
-- **In `CANCELLED` state**: Primary and secondary participants can withdraw their positions for full refunds (no oracle fee on remove/refund). No new positions can be added, and no payouts can be claimed.
-- Oracle fees are deducted on settled payout flows (`claim*` and `push*`) and then claimed through `claimOracleFee()`.
+- **In `CANCELLED` state**: Primary and secondary participants can withdraw their positions for full refunds. No new positions can be added, and no payouts can be claimed.
+- **Referral network fee**: At settlement, `referralNetworkBps` (e.g. 5%) is deducted once from gross distributable TVL (primary pool + secondary TVL). The fee is routed through the contest’s `rewardDistributor` to the winning entry owner’s referrer chain, or to the oracle if no payable referrer exists. `claim*` and `push*` pay full net amounts with no further fee skimming.
 
 ## Quick Usage Guide
 
@@ -60,7 +60,7 @@ contest.addPrimaryPosition(entryId, merkleProof);
 // Remove position during OPEN phase (full refund)
 contest.removePrimaryPosition(entryId);
 
-// After settlement: claim Layer-1 prize (net of oracle fee)
+// After settlement: claim Layer-1 prize (net of referral fee applied at settlement)
 contest.claimPrimaryPayout(entryId);
 ```
 
@@ -75,7 +75,7 @@ contest.removeSecondaryPosition(entryId, tokenAmount);
 
 // Claim payout after settlement (winner-take-all on the oracle’s first winning primary entry):
 // all secondary payment-token backing across entries is merged to that entry at settlement, then
-// redeemed pro-rata by ERC1155 holders of that entry (net of oracle fee). If no supply exists on
+// redeemed pro-rata by ERC1155 holders of that entry. If no supply exists on
 // that entry, merged secondary TVL is added to primary payout allocations instead.
 contest.claimSecondaryPayout(entryId);
 ```
@@ -86,9 +86,9 @@ contest.claimSecondaryPayout(entryId);
 // State transitions
 contest.activateContest();        // OPEN → ACTIVE
 contest.lockContest();            // ACTIVE → LOCKED
-contest.settleContest(winningEntries, payoutBps);  // LOCKED → SETTLED
+contest.settleContest(winningEntries, payoutBps, referralReward, referralSignature);  // LOCKED → SETTLED
 
-// Optional: Push payouts for efficiency
+// Optional: Push payouts for efficiency (full net amounts)
 contest.pushPrimaryPayouts(entryIds);
 contest.pushSecondaryPayouts(participantAddresses, entryId);
 
@@ -97,7 +97,6 @@ contest.setPrimaryMerkleRoot(root);
 contest.setSecondaryMerkleRoot(root);
 contest.cancelContest();
 contest.closeContest();
-contest.claimOracleFee();
 ```
 
 ### View Functions
@@ -137,16 +136,19 @@ address contest = factory.createContest(
     paymentToken,                      // ERC20 token address (e.g., CUT)
     oracle,                            // Oracle address (controls state)
     contestantDepositAmount,           // Fixed deposit for primary participants
-    oracleFee,                         // Oracle fee in basis points (max 1000 = 10%)
+    referralNetworkBps,                // Referral network fee in basis points at settlement (max 1000 = 10%)
     expiry,                            // Expiration timestamp
-    primaryDepositSecondarySubsidyBps  // e.g. 700 = 7%; BPS of each primary deposit to secondary subsidy (unbacked)
+    primaryDepositSecondarySubsidyBps, // e.g. 700 = 7%; BPS of each primary deposit to secondary subsidy (unbacked)
+    rewardDistributor,                 // Platform RewardDistributor (referralTree)
+    referralGroupId                    // bytes32 group for ReferralGraph lookups
 );
 ```
 
 ### Example Parameters
 
 - `paymentToken`: Address of ERC20 token (typically platform token)
-- `oracleFee`: 100 = 1% fee
+- `referralNetworkBps`: 500 = 5% fee at settlement (standard in tests)
+- `rewardDistributor` / `referralGroupId`: per-contest immutables; backend typically passes the same platform values for every contest
 - `primaryDepositSecondarySubsidyBps`: 700 = 7% (matches test and doc baselines in this repo)
 
 ## Testing Guide

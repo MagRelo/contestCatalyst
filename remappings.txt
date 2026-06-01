@@ -1,0 +1,2 @@
+referralTree/=lib/referralTree/src/
+@openzeppelin/contracts/=lib/referralTree/lib/openzeppelin-contracts/contracts/

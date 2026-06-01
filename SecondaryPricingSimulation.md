@@ -287,7 +287,7 @@ Oracle fees apply on settled secondary payout claims (`claimSecondaryPayout` / `
 
 | Parameter                        | Value | Description                                                                 |
 | -------------------------------- | ----- | --------------------------------------------------------------------------- |
-| `oracleFeeBps`                   | 500   | Oracle fee: 5% (500 basis points)                                           |
+| `referralNetworkBps`             | 500   | Referral network fee: 5% at settlement (500 basis points)                   |
 | `primaryDepositSecondarySubsidyBps` | 700 | 7% of each primary deposit to per-entry subsidy; 93% to `primaryPrizePool` |
 
 ### Tuning Parameters

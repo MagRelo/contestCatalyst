@@ -7,7 +7,7 @@ This analysis uses the following contest settings:
 | Parameter                          | Value | Description                                                                 |
 | ---------------------------------- | ----- | ----------------------------------------------------------------------------- |
 | `PRIMARY_DEPOSIT`                  | $25   | Fixed amount each primary participant must deposit                            |
-| `oracleFeeBps`                     | 500   | Oracle fee: 5% (500 basis points)                                               |
+| `referralNetworkBps`               | 500   | Referral network fee: 5% of gross distributable TVL at settlement (500 basis points) |
 | `primaryDepositSecondarySubsidyBps`| 700   | 7% of each primary deposit credits `secondaryPrimarySubsidyPerEntry` (unbacked) |
 | `COEFFICIENT`                      | 1     | Quadratic bonding curve coefficient                                           |
 | `BASE_PRICE`                       | 1e6   | Minimum price: 1.0 (scaled by PRICE_PRECISION)                                  |

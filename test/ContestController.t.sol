@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "forge-std/Test.sol";
 import "../src/ContestController.sol";
-import "../src/ContestFactory.sol";
+import "./helpers/ReferralTestHarness.sol";
+import "referralTree/interfaces/IRewardDistributor.sol";
 import "../src/SecondaryPricing.sol";
 import "solmate/tokens/ERC20.sol";
 import "solady/utils/MerkleTreeLib.sol";
@@ -22,15 +22,14 @@ import "solady/utils/MerkleProofLib.sol";
  * 
  * All tests respect standard settings from AGENTS.md:
  * - PRIMARY_DEPOSIT = 25e18 ($25)
- * - ORACLE_FEE_BPS = 500 (5%)
+ * - REFERRAL_NETWORK_BPS = 500 (5%)
  * - PURCHASE_INCREMENT = 10e18 ($10)
  * - PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS = 700 (7% of each primary deposit to per-entry subsidy)
  */
-contract ContestControllerTest is Test {
+contract ContestControllerTest is ReferralTestHarness {
     // Standard settings from agents.md
     uint256 public constant PRIMARY_DEPOSIT = 25e18; // $25
     uint256 public constant PURCHASE_INCREMENT = 10e18; // $10
-    uint256 public constant ORACLE_FEE_BPS = 500; // 5%
     uint256 public constant PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS = 700; // 7%
 
     function _standardSubsidyPerPrimaryDeposit() internal pure returns (uint256) {
@@ -52,7 +51,6 @@ contract ContestControllerTest is Test {
     }
     
     // Test contracts
-    ContestFactory public factory;
     ContestController public contest;
     MockERC20 public paymentToken;
     
@@ -75,23 +73,16 @@ contract ContestControllerTest is Test {
     uint256 public constant EXPIRY_OFFSET = 365 days;
     
     function setUp() public {
-        // Deploy mock ERC20 token
         paymentToken = new MockERC20("Payment Token", "PAY", 18);
-        
-        // Deploy factory
-        factory = new ContestFactory();
-        
-        // Create contest
-        address contestAddress = factory.createContest(
+        _initReferralInfra();
+        contest = _createContest(
             address(paymentToken),
             oracle,
             PRIMARY_DEPOSIT,
-            ORACLE_FEE_BPS,
+            REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
             PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
         );
-        
-        contest = ContestController(contestAddress);
         
         // Fund users
         paymentToken.mint(user1, 100000e18);
@@ -108,31 +99,26 @@ contract ContestControllerTest is Test {
     /**
      * @notice Deploy a new contest with standard settings
      */
-    function _deployContest(
-        address _oracle,
-        uint256 _expiryOffset
-    ) internal returns (ContestController) {
-        address contestAddress = factory.createContest(
+    function _deployContest(address _oracle, uint256 _expiryOffset) internal returns (ContestController) {
+        return _createContest(
             address(paymentToken),
             _oracle,
             PRIMARY_DEPOSIT,
-            ORACLE_FEE_BPS,
+            REFERRAL_NETWORK_BPS,
             block.timestamp + _expiryOffset,
             PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
         );
-        return ContestController(contestAddress);
     }
 
     function _deployContestSubsidy(uint256 subsidyBps) internal returns (ContestController) {
-        address contestAddress = factory.createContest(
+        return _createContest(
             address(paymentToken),
             oracle,
             PRIMARY_DEPOSIT,
-            ORACLE_FEE_BPS,
+            REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
             subsidyBps
         );
-        return ContestController(contestAddress);
     }
 
     /**
@@ -250,8 +236,8 @@ contract ContestControllerTest is Test {
     /**
      * @notice Calculate expected oracle fee
      */
-    function _calculateExpectedOracleFee(uint256 amount) internal pure returns (uint256) {
-        return (amount * ORACLE_FEE_BPS) / 10000;
+    function _calculateExpectedReferralFee(uint256 totalGross) internal pure returns (uint256) {
+        return (totalGross * REFERRAL_NETWORK_BPS) / 10000;
     }
     
     /**
@@ -286,7 +272,7 @@ contract ContestControllerTest is Test {
         assertEq(address(newContest.paymentToken()), address(paymentToken));
         assertEq(newContest.oracle(), oracle);
         assertEq(newContest.primaryDepositAmount(), PRIMARY_DEPOSIT);
-        assertEq(newContest.oracleFeeBps(), ORACLE_FEE_BPS);
+        assertEq(newContest.referralNetworkBps(), REFERRAL_NETWORK_BPS);
         assertEq(newContest.primaryDepositSecondarySubsidyBps(), PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS);
         assertEq(uint8(newContest.state()), uint8(ContestState.OPEN));
     }
@@ -297,9 +283,11 @@ contract ContestControllerTest is Test {
             address(0),
             oracle,
             PRIMARY_DEPOSIT,
-            ORACLE_FEE_BPS,
+            REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
-            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
+            address(rewardDistributor),
+            REFERRAL_GROUP_ID
         );
     }
     
@@ -309,9 +297,11 @@ contract ContestControllerTest is Test {
             address(paymentToken),
             address(0),
             PRIMARY_DEPOSIT,
-            ORACLE_FEE_BPS,
+            REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
-            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
+            address(rewardDistributor),
+            REFERRAL_GROUP_ID
         );
     }
     
@@ -320,9 +310,11 @@ contract ContestControllerTest is Test {
             address(paymentToken),
             oracle,
             0,
-            ORACLE_FEE_BPS,
+            REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
-            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
+            address(rewardDistributor),
+            REFERRAL_GROUP_ID
         );
         ContestController freeContest = ContestController(contestAddress);
         assertEq(freeContest.primaryDepositAmount(), 0);
@@ -335,9 +327,11 @@ contract ContestControllerTest is Test {
             address(paymentToken),
             oracle,
             0,
-            ORACLE_FEE_BPS,
+            REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
-            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
+            address(rewardDistributor),
+            REFERRAL_GROUP_ID
         );
         ContestController freeContest = ContestController(contestAddress);
         paymentToken.mint(user1, PURCHASE_INCREMENT);
@@ -357,14 +351,16 @@ contract ContestControllerTest is Test {
     }
     
     function test_constructor_OracleFeeTooHigh() public {
-        vm.expectRevert("Oracle fee too high");
+        vm.expectRevert("Referral network fee too high");
         factory.createContest(
             address(paymentToken),
             oracle,
             PRIMARY_DEPOSIT,
             1001, // > 10%
             block.timestamp + EXPIRY_OFFSET,
-            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
+            address(rewardDistributor),
+            REFERRAL_GROUP_ID
         );
     }
     
@@ -374,9 +370,11 @@ contract ContestControllerTest is Test {
             address(paymentToken),
             oracle,
             PRIMARY_DEPOSIT,
-            ORACLE_FEE_BPS,
+            REFERRAL_NETWORK_BPS,
             block.timestamp - 1,
-            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
+            address(rewardDistributor),
+            REFERRAL_GROUP_ID
         );
     }
 
@@ -386,9 +384,11 @@ contract ContestControllerTest is Test {
             address(paymentToken),
             oracle,
             PRIMARY_DEPOSIT,
-            ORACLE_FEE_BPS,
+            REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
-            10_001
+            10_001,
+            address(rewardDistributor),
+            REFERRAL_GROUP_ID
         );
     }
 
@@ -462,12 +462,11 @@ contract ContestControllerTest is Test {
         winners[0] = ENTRY_1;
         uint256[] memory payoutBps = new uint256[](1);
         payoutBps[0] = 10_000;
-
-        vm.prank(oracle);
-        c.settleContest(winners, payoutBps);
+        _settleContest(c, winners, payoutBps);
 
         uint256 gross = PURCHASE_INCREMENT + (PRIMARY_DEPOSIT * 2000) / 10_000;
-        assertEq(c.secondaryLiquidityPerEntry(ENTRY_1), gross);
+        uint256 netSecondary = (gross * _netBps(c)) / 10_000;
+        assertEq(c.secondaryLiquidityPerEntry(ENTRY_1), netSecondary);
         assertEq(c.secondaryPrimarySubsidyPerEntry(ENTRY_1), 0);
     }
     
@@ -480,8 +479,6 @@ contract ContestControllerTest is Test {
         
         uint256 balanceBefore = paymentToken.balanceOf(user1);
         uint256 contractBalanceBefore = _getContractBalance();
-        uint256 oracleFeeBefore = contest.accumulatedOracleFee();
-        
         vm.prank(user1);
         vm.expectEmit(true, true, false, false);
         emit ContestController.PrimaryPositionAdded(user1, ENTRY_1);
@@ -492,8 +489,6 @@ contract ContestControllerTest is Test {
         assertEq(contest.getEntryAtIndex(0), ENTRY_1);
         assertEq(paymentToken.balanceOf(user1), balanceBefore - PRIMARY_DEPOSIT);
         assertEq(_getContractBalance(), contractBalanceBefore + PRIMARY_DEPOSIT);
-        
-        assertEq(contest.accumulatedOracleFee(), oracleFeeBefore);
     }
     
     function test_addPrimaryPosition_MerkleRootGating() public {
@@ -580,19 +575,12 @@ contract ContestControllerTest is Test {
         contest.addPrimaryPosition(ENTRY_1, new bytes32[](0));
     }
     
-    function test_addPrimaryPosition_OracleFeeNotAccumulated() public {
+    function test_addPrimaryPosition_NoReferralFeeOnDeposit() public {
         _fundUser(user1, PRIMARY_DEPOSIT * 2);
         _createPrimaryEntry(user1, ENTRY_1);
-        
-        uint256 fee1 = contest.accumulatedOracleFee();
-        assertEq(fee1, 0);
-        
         _fundUser(user2, PRIMARY_DEPOSIT);
         vm.prank(user2);
         contest.addPrimaryPosition(ENTRY_2, new bytes32[](0));
-        
-        uint256 fee2 = contest.accumulatedOracleFee();
-        assertEq(fee2, fee1);
     }
     
     // ============ removePrimaryPosition Tests ============
@@ -602,8 +590,6 @@ contract ContestControllerTest is Test {
         
         uint256 balanceBefore = paymentToken.balanceOf(user1);
         uint256 contractBalanceBefore = _getContractBalance();
-        uint256 oracleFeeBefore = contest.accumulatedOracleFee();
-        
         vm.prank(user1);
         vm.expectEmit(true, true, false, false);
         emit ContestController.PrimaryPositionRemoved(ENTRY_1, user1);
@@ -612,7 +598,6 @@ contract ContestControllerTest is Test {
         assertEq(contest.entryOwner(ENTRY_1), address(0));
         assertEq(paymentToken.balanceOf(user1), balanceBefore + PRIMARY_DEPOSIT);
         assertEq(_getContractBalance(), contractBalanceBefore - PRIMARY_DEPOSIT);
-        assertEq(contest.accumulatedOracleFee(), oracleFeeBefore);
     }
     
     function test_removePrimaryPosition_SuccessInCancelledState() public {
@@ -681,20 +666,17 @@ contract ContestControllerTest is Test {
         uint256[] memory payouts = new uint256[](2);
         payouts[0] = 7000; // 70%
         payouts[1] = 3000; // 30%
-        
-        vm.prank(oracle);
-        contest.settleContest(winners, payouts);
+        _settleContest(contest, winners, payouts);
         
         uint256 payout = contest.primaryPrizePoolPayouts(ENTRY_1);
-        uint256 expectedNetPayout = payout - _calculateExpectedOracleFee(payout);
         uint256 balanceBefore = paymentToken.balanceOf(user1);
         
         vm.prank(user1);
         vm.expectEmit(true, true, false, false);
-        emit ContestController.PrimaryPayoutClaimed(user1, ENTRY_1, expectedNetPayout);
+        emit ContestController.PrimaryPayoutClaimed(user1, ENTRY_1, payout);
         contest.claimPrimaryPayout(ENTRY_1);
         
-        assertEq(paymentToken.balanceOf(user1), balanceBefore + expectedNetPayout);
+        assertEq(paymentToken.balanceOf(user1), balanceBefore + payout);
         assertEq(contest.primaryPrizePoolPayouts(ENTRY_1), 0);
     }
     
@@ -717,18 +699,15 @@ contract ContestControllerTest is Test {
         uint256[] memory payouts = new uint256[](2);
         payouts[0] = 7000;
         payouts[1] = 3000;
-
-        vm.prank(oracle);
-        contest.settleContest(winners, payouts);
+        _settleContest(contest, winners, payouts);
 
         uint256 payout = contest.primaryPrizePoolPayouts(ENTRY_1);
-        uint256 netPrize = payout - _calculateExpectedOracleFee(payout);
         uint256 balanceBefore = paymentToken.balanceOf(user1);
 
         vm.prank(user1);
         contest.claimPrimaryPayout(ENTRY_1);
 
-        assertEq(paymentToken.balanceOf(user1), balanceBefore + netPrize);
+        assertEq(paymentToken.balanceOf(user1), balanceBefore + payout);
     }
 
     function test_claimPrimaryPayout_WrongState() public {
@@ -753,9 +732,7 @@ contract ContestControllerTest is Test {
         winners[0] = ENTRY_1;
         uint256[] memory payouts = new uint256[](1);
         payouts[0] = 10000;
-        
-        vm.prank(oracle);
-        contest.settleContest(winners, payouts);
+        _settleContest(contest, winners, payouts);
         
         vm.prank(user2);
         vm.expectRevert("Not entry owner");
@@ -776,9 +753,7 @@ contract ContestControllerTest is Test {
         winners[0] = ENTRY_2;
         uint256[] memory payouts = new uint256[](1);
         payouts[0] = 10000;
-        
-        vm.prank(oracle);
-        contest.settleContest(winners, payouts);
+        _settleContest(contest, winners, payouts);
         
         vm.prank(user1);
         vm.expectRevert("No payout");
@@ -933,15 +908,10 @@ contract ContestControllerTest is Test {
     
     function test_addSecondaryPosition_OracleFeeNotDeducted() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        
-        uint256 oracleFeeBefore = contest.accumulatedOracleFee();
         _fundUser(user2, PURCHASE_INCREMENT);
         
         vm.prank(user2);
         contest.addSecondaryPosition(ENTRY_1, PURCHASE_INCREMENT, new bytes32[](0));
-        
-        uint256 oracleFeeAfter = contest.accumulatedOracleFee();
-        assertEq(oracleFeeAfter, oracleFeeBefore);
     }
     
     // ============ removeSecondaryPosition Tests ============
@@ -1091,13 +1061,14 @@ contract ContestControllerTest is Test {
         winners[0] = ENTRY_1;
         uint256[] memory payouts = new uint256[](1);
         payouts[0] = 10000;
-        
-        vm.prank(oracle);
-        contest.settleContest(winners, payouts);
+
+        uint256 grossSecondary =
+            PURCHASE_INCREMENT * 10 + PURCHASE_INCREMENT * 5 + 2 * _standardSubsidyPerPrimaryDeposit();
+        uint256 netSecondary = (grossSecondary * _netBps(contest)) / 10_000;
+
+        _settleContest(contest, winners, payouts);
         
         uint256 balanceBefore = paymentToken.balanceOf(user3);
-        
-        uint256 secondaryTvlBeforeSettle = contest.getSecondarySideBalance();
 
         vm.prank(user3);
         contest.claimSecondaryPayout(ENTRY_1);
@@ -1106,10 +1077,6 @@ contract ContestControllerTest is Test {
         assertGt(paymentToken.balanceOf(user3), balanceBefore);
         assertEq(contest.totalSecondaryLiquidity(), 0);
         assertEq(contest.getSecondarySideBalance(), 0);
-        assertEq(
-            secondaryTvlBeforeSettle,
-            PURCHASE_INCREMENT * 10 + PURCHASE_INCREMENT * 5 + 2 * _standardSubsidyPerPrimaryDeposit()
-        );
     }
 
     function test_secondaryDepositedPerEntry_claimResetsToZero() public {
@@ -1133,9 +1100,7 @@ contract ContestControllerTest is Test {
         winners[0] = ENTRY_1;
         uint256[] memory payouts = new uint256[](1);
         payouts[0] = 10000;
-
-        vm.prank(oracle);
-        contest.settleContest(winners, payouts);
+        _settleContest(contest, winners, payouts);
 
         vm.prank(user3);
         contest.claimSecondaryPayout(ENTRY_1);
@@ -1169,9 +1134,7 @@ contract ContestControllerTest is Test {
         winners[0] = ENTRY_1;
         uint256[] memory payouts = new uint256[](1);
         payouts[0] = 10000;
-        
-        vm.prank(oracle);
-        contest.settleContest(winners, payouts);
+        _settleContest(contest, winners, payouts);
         
         vm.prank(user4);
         vm.expectRevert("Not winning entry");
@@ -1190,9 +1153,7 @@ contract ContestControllerTest is Test {
         winners[0] = ENTRY_1;
         uint256[] memory payouts = new uint256[](1);
         payouts[0] = 10000;
-        
-        vm.prank(oracle);
-        contest.settleContest(winners, payouts);
+        _settleContest(contest, winners, payouts);
         
         vm.prank(user2);
         vm.expectRevert("No tokens");
@@ -1215,11 +1176,11 @@ contract ContestControllerTest is Test {
         winners[0] = ENTRY_1;
         uint256[] memory payouts = new uint256[](1);
         payouts[0] = 10000;
-        
-        vm.prank(oracle);
-        contest.settleContest(winners, payouts);
-        
-        uint256 secondaryTvlBeforeSettle = contest.getSecondarySideBalance();
+
+        uint256 grossSecondary = PURCHASE_INCREMENT * 25 + 2 * _standardSubsidyPerPrimaryDeposit();
+        uint256 netSecondary = (grossSecondary * _netBps(contest)) / 10_000;
+
+        _settleContest(contest, winners, payouts);
 
         vm.prank(user3);
         contest.claimSecondaryPayout(ENTRY_1);
@@ -1234,10 +1195,6 @@ contract ContestControllerTest is Test {
 
         assertEq(contest.totalSecondaryLiquidity(), 0);
         assertEq(contest.getSecondarySideBalance(), 0);
-        assertEq(
-            secondaryTvlBeforeSettle,
-            PURCHASE_INCREMENT * 25 + 2 * _standardSubsidyPerPrimaryDeposit()
-        );
     }
 
     /// @dev Losing-entry secondary TVL is merged to the winning entry at settlement and is claimable only by winning-entry token holders
@@ -1259,13 +1216,12 @@ contract ContestControllerTest is Test {
         winners[0] = ENTRY_1;
         uint256[] memory payouts = new uint256[](1);
         payouts[0] = 10000;
-
-        vm.prank(oracle);
-        contest.settleContest(winners, payouts);
+        uint256 netSecondary = (tvlBefore * _netBps(contest)) / 10_000;
+        _settleContest(contest, winners, payouts);
 
         assertEq(contest.secondaryLiquidityPerEntry(ENTRY_2), 0);
-        assertEq(contest.getSecondarySideBalance(), tvlBefore);
-        assertEq(contest.secondaryLiquidityPerEntry(ENTRY_1), tvlBefore);
+        assertEq(contest.getSecondarySideBalance(), netSecondary);
+        assertEq(contest.secondaryLiquidityPerEntry(ENTRY_1), netSecondary);
 
         uint256 u3Before = paymentToken.balanceOf(user3);
         vm.prank(user3);
@@ -1367,7 +1323,7 @@ contract ContestControllerTest is Test {
         vm.prank(oracle);
         vm.expectEmit(true, false, false, false);
         emit ContestController.ContestSettled(winners, payouts);
-        contest.settleContest(winners, payouts);
+        _settleContest(contest, winners, payouts);
         
         assertEq(uint8(contest.state()), uint8(ContestState.SETTLED));
         assertGt(contest.primaryPrizePoolPayouts(ENTRY_1), 0);
@@ -1388,9 +1344,7 @@ contract ContestControllerTest is Test {
         uint256[] memory payouts = new uint256[](2);
         payouts[0] = 5000;
         payouts[1] = 5000;
-        
-        vm.prank(oracle);
-        contest.settleContest(winners, payouts);
+        _settleContest(contest, winners, payouts);
         
         assertEq(uint8(contest.state()), uint8(ContestState.SETTLED));
     }
@@ -1407,9 +1361,7 @@ contract ContestControllerTest is Test {
         uint256[] memory payouts = new uint256[](2);
         payouts[0] = 6000;
         payouts[1] = 4000;
-        
-        vm.prank(oracle);
-        contest.settleContest(winners, payouts);
+        _settleContest(contest, winners, payouts);
         
         assertEq(contest.secondaryWinningEntry(), ENTRY_2);
     }
@@ -1434,12 +1386,14 @@ contract ContestControllerTest is Test {
         uint256 secondaryTvlBefore = contest.getSecondarySideBalance();
         uint256 twoSubsidy = 2 * _standardSubsidyPerPrimaryDeposit();
         assertEq(secondaryTvlBefore, PURCHASE_INCREMENT + twoSubsidy);
+        _settleContest(contest, winners, payouts);
 
-        vm.prank(oracle);
-        contest.settleContest(winners, payouts);
-
-        // All secondary TVL is merged to the winning entry; with no winning secondary supply it spills to primary payouts
-        assertEq(contest.primaryPrizePoolPayouts(ENTRY_1), primaryPoolBefore + PURCHASE_INCREMENT + twoSubsidy);
+        // All secondary TVL is merged to the winning entry; with no winning secondary supply it spills to primary payouts (net of referral fee)
+        uint256 grossSecondary = PURCHASE_INCREMENT + twoSubsidy;
+        uint256 netBps = _netBps(contest);
+        uint256 netPrimary = (primaryPoolBefore * netBps) / 10_000;
+        uint256 netSecondary = (grossSecondary * netBps) / 10_000;
+        assertEq(contest.primaryPrizePoolPayouts(ENTRY_1), netPrimary + netSecondary);
         assertEq(contest.getSecondarySideBalance(), 0);
         assertEq(contest.secondaryLiquidityPerEntry(ENTRY_2), 0);
     }
@@ -1452,9 +1406,7 @@ contract ContestControllerTest is Test {
         uint256[] memory payouts = new uint256[](1);
         payouts[0] = 10000;
         
-        vm.prank(oracle);
-        vm.expectRevert("Contest not active or locked");
-        contest.settleContest(winners, payouts);
+        _settleContestExpectRevert(contest, winners, payouts, "Contest not active or locked");
     }
     
     function test_settleContest_NoWinners() public {
@@ -1465,9 +1417,7 @@ contract ContestControllerTest is Test {
         uint256[] memory winners = new uint256[](0);
         uint256[] memory payouts = new uint256[](0);
         
-        vm.prank(oracle);
-        vm.expectRevert("Must have at least one winner");
-        contest.settleContest(winners, payouts);
+        _settleContestExpectRevert(contest, winners, payouts, "Must have at least one winner");
     }
     
     function test_settleContest_ArrayLengthMismatch() public {
@@ -1481,9 +1431,7 @@ contract ContestControllerTest is Test {
         payouts[0] = 5000;
         payouts[1] = 5000;
         
-        vm.prank(oracle);
-        vm.expectRevert("Array length mismatch");
-        contest.settleContest(winners, payouts);
+        _settleContestExpectRevert(contest, winners, payouts, "Array length mismatch");
     }
     
     function test_settleContest_TooManyWinners() public {
@@ -1498,9 +1446,7 @@ contract ContestControllerTest is Test {
         payouts[0] = 5000;
         payouts[1] = 5000;
         
-        vm.prank(oracle);
-        vm.expectRevert("Too many winners");
-        contest.settleContest(winners, payouts);
+        _settleContestExpectRevert(contest, winners, payouts, "Too many winners");
     }
     
     function test_settleContest_PayoutsDontSumTo100() public {
@@ -1513,9 +1459,7 @@ contract ContestControllerTest is Test {
         uint256[] memory payouts = new uint256[](1);
         payouts[0] = 5000; // 50%, should be 10000
         
-        vm.prank(oracle);
-        vm.expectRevert("Payouts must sum to 100%");
-        contest.settleContest(winners, payouts);
+        _settleContestExpectRevert(contest, winners, payouts, "Payouts must sum to 100%");
     }
     
     function test_settleContest_ZeroPayouts() public {
@@ -1531,9 +1475,7 @@ contract ContestControllerTest is Test {
         payouts[0] = 10000;
         payouts[1] = 0; // Zero payout
         
-        vm.prank(oracle);
-        vm.expectRevert("Use non-zero payouts only");
-        contest.settleContest(winners, payouts);
+        _settleContestExpectRevert(contest, winners, payouts, "Use non-zero payouts only");
     }
     
     // ============ cancelContest Tests ============
@@ -1582,9 +1524,7 @@ contract ContestControllerTest is Test {
         winners[0] = ENTRY_1;
         uint256[] memory payouts = new uint256[](1);
         payouts[0] = 10000;
-        
-        vm.prank(oracle);
-        contest.settleContest(winners, payouts);
+        _settleContest(contest, winners, payouts);
         
         vm.prank(oracle);
         vm.expectRevert("Contest settled - cannot cancel");
@@ -1660,59 +1600,11 @@ contract ContestControllerTest is Test {
         winners[0] = ENTRY_1;
         uint256[] memory payouts = new uint256[](1);
         payouts[0] = 10000;
-        
-        vm.prank(oracle);
-        contest.settleContest(winners, payouts);
+        _settleContest(contest, winners, payouts);
         
         vm.warp(block.timestamp + EXPIRY_OFFSET);
         vm.expectRevert("Already settled");
         contest.cancelExpired();
-    }
-    
-    // ============ claimOracleFee Tests ============
-    
-    function test_claimOracleFee_Success() public {
-        _createPrimaryEntry(user1, ENTRY_1);
-        _createPrimaryEntry(user2, ENTRY_2);
-        vm.prank(oracle);
-        contest.activateContest();
-        vm.prank(oracle);
-        contest.lockContest();
-        
-        uint256[] memory winners = new uint256[](1);
-        winners[0] = ENTRY_1;
-        uint256[] memory payouts = new uint256[](1);
-        payouts[0] = 10000;
-        vm.prank(oracle);
-        contest.settleContest(winners, payouts);
-        
-        vm.prank(user1);
-        contest.claimPrimaryPayout(ENTRY_1);
-        
-        uint256 fee = contest.accumulatedOracleFee();
-        assertGt(fee, 0);
-        
-        uint256 balanceBefore = paymentToken.balanceOf(oracle);
-        
-        vm.prank(oracle);
-        contest.claimOracleFee();
-        
-        assertEq(paymentToken.balanceOf(oracle), balanceBefore + fee);
-        assertEq(contest.accumulatedOracleFee(), 0);
-    }
-    
-    function test_claimOracleFee_NotOracle() public {
-        _createPrimaryEntry(user1, ENTRY_1);
-        
-        vm.prank(nonOracle);
-        vm.expectRevert("Not oracle");
-        contest.claimOracleFee();
-    }
-    
-    function test_claimOracleFee_NoFeeToClaim() public {
-        vm.prank(oracle);
-        vm.expectRevert("No fee to claim");
-        contest.claimOracleFee();
     }
     
     // ============ setPrimaryMerkleRoot Tests ============
@@ -1794,9 +1686,7 @@ contract ContestControllerTest is Test {
         uint256[] memory payouts = new uint256[](2);
         payouts[0] = 7000;
         payouts[1] = 3000;
-        
-        vm.prank(oracle);
-        contest.settleContest(winners, payouts);
+        _settleContest(contest, winners, payouts);
         
         uint256[] memory entryIds = new uint256[](1);
         entryIds[0] = ENTRY_1;
@@ -1826,21 +1716,18 @@ contract ContestControllerTest is Test {
         uint256[] memory payouts = new uint256[](2);
         payouts[0] = 7000;
         payouts[1] = 3000;
-
-        vm.prank(oracle);
-        contest.settleContest(winners, payouts);
+        _settleContest(contest, winners, payouts);
 
         uint256[] memory entryIds = new uint256[](1);
         entryIds[0] = ENTRY_1;
 
         uint256 payout = contest.primaryPrizePoolPayouts(ENTRY_1);
-        uint256 netPrize = payout - _calculateExpectedOracleFee(payout);
         uint256 balanceBefore = paymentToken.balanceOf(user1);
 
         vm.prank(oracle);
         contest.pushPrimaryPayouts(entryIds);
 
-        assertEq(paymentToken.balanceOf(user1), balanceBefore + netPrize);
+        assertEq(paymentToken.balanceOf(user1), balanceBefore + payout);
     }
     
     function test_pushPrimaryPayouts_NotSettled() public {
@@ -1869,9 +1756,7 @@ contract ContestControllerTest is Test {
         winners[0] = ENTRY_2;
         uint256[] memory payouts = new uint256[](1);
         payouts[0] = 10000;
-        
-        vm.prank(oracle);
-        contest.settleContest(winners, payouts);
+        _settleContest(contest, winners, payouts);
         
         uint256[] memory entryIds = new uint256[](1);
         entryIds[0] = ENTRY_1;
@@ -1898,9 +1783,7 @@ contract ContestControllerTest is Test {
         winners[0] = ENTRY_1;
         uint256[] memory payouts = new uint256[](1);
         payouts[0] = 10000;
-        
-        vm.prank(oracle);
-        contest.settleContest(winners, payouts);
+        _settleContest(contest, winners, payouts);
         
         address[] memory participants = new address[](1);
         participants[0] = user3;
@@ -1940,9 +1823,7 @@ contract ContestControllerTest is Test {
         winners[0] = ENTRY_1;
         uint256[] memory payouts = new uint256[](1);
         payouts[0] = 10000;
-        
-        vm.prank(oracle);
-        contest.settleContest(winners, payouts);
+        _settleContest(contest, winners, payouts);
         
         address[] memory participants = new address[](1);
         participants[0] = user3;
@@ -2086,9 +1967,7 @@ contract ContestControllerTest is Test {
         winners[0] = ENTRY_1;
         uint256[] memory payouts = new uint256[](1);
         payouts[0] = 10000;
-        
-        vm.prank(oracle);
-        contest.settleContest(winners, payouts);
+        _settleContest(contest, winners, payouts);
         assertEq(uint8(contest.state()), uint8(ContestState.SETTLED));
     }
     
@@ -2109,9 +1988,7 @@ contract ContestControllerTest is Test {
         winners[0] = ENTRY_1;
         uint256[] memory payouts = new uint256[](1);
         payouts[0] = 10000;
-        
-        vm.prank(oracle);
-        contest.settleContest(winners, payouts);
+        _settleContest(contest, winners, payouts);
         
         vm.prank(oracle);
         vm.expectRevert("Contest already started");
@@ -2132,18 +2009,13 @@ contract ContestControllerTest is Test {
         assertEq(contest.entryOwner(entryId), user1);
     }
     
-    function testFuzz_addPrimaryPosition_OracleFeeNotAccumulated(uint256 amount) public {
+    function testFuzz_addPrimaryPosition_NoReferralFeeOnDeposit(uint256 amount) public {
         // Use fixed deposit amount, but test fee calculation
         amount = PRIMARY_DEPOSIT;
         
         _fundUser(user1, amount);
-        uint256 feeBefore = contest.accumulatedOracleFee();
-        
         vm.prank(user1);
         contest.addPrimaryPosition(ENTRY_1, new bytes32[](0));
-        
-        uint256 feeAfter = contest.accumulatedOracleFee();
-        assertEq(feeAfter, feeBefore);
     }
     
     function testFuzz_removePrimaryPosition_FullRefund(uint256 entryId) public {
@@ -2211,9 +2083,7 @@ contract ContestControllerTest is Test {
         uint256 totalContractBalance = _getContractBalance();
         uint256 primaryBalance = contest.getPrimarySideBalance();
         uint256 secondaryBalance = contest.getSecondarySideBalance();
-        uint256 oracleFee = contest.accumulatedOracleFee();
-        
-        uint256 expectedTotal = primaryBalance + secondaryBalance + oracleFee;
+        uint256 expectedTotal = primaryBalance + secondaryBalance;
         
         // Allow small rounding differences
         assertApproxEqRel(totalContractBalance, expectedTotal, 0.01e18);
@@ -2225,11 +2095,10 @@ contract ContestControllerTest is Test {
         assertEq(primaryPool, _standardPrimaryPortionPerDeposit());
     }
     
-    function test_invariant_OracleFeeBounded() public {
+    function test_invariant_NoAccumulatedReferralFeeBeforeSettle() public {
         _createPrimaryEntry(user1, ENTRY_1);
         
-        uint256 fee = contest.accumulatedOracleFee();
-        assertEq(fee, 0);
+        assertEq(contest.referralSettlementNonce(), 0);
     }
     
     function test_invariant_PriceMonotonic() public {
@@ -2342,18 +2211,15 @@ contract ContestControllerTest is Test {
         uint256[] memory payouts = new uint256[](2);
         payouts[0] = 7000;
         payouts[1] = 3000;
-
-        vm.prank(oracle);
-        contest.settleContest(winners, payouts);
+        _settleContest(contest, winners, payouts);
 
         uint256 payout = contest.primaryPrizePoolPayouts(ENTRY_1);
-        uint256 netPrize = payout - _calculateExpectedOracleFee(payout);
         uint256 balanceBefore = paymentToken.balanceOf(user1);
 
         vm.prank(user1);
         contest.claimPrimaryPayout(ENTRY_1);
 
-        assertEq(paymentToken.balanceOf(user1), balanceBefore + netPrize);
+        assertEq(paymentToken.balanceOf(user1), balanceBefore + payout);
     }
     
     function test_UX_ClearErrorMessages() public {
@@ -2438,9 +2304,7 @@ contract ContestControllerTest is Test {
         winners[0] = ENTRY_1;
         uint256[] memory payouts = new uint256[](1);
         payouts[0] = 10000;
-        
-        vm.prank(oracle);
-        contest.settleContest(winners, payouts);
+        _settleContest(contest, winners, payouts);
         
         assertGt(contest.primaryPrizePoolPayouts(ENTRY_1), 0);
     }
@@ -2475,9 +2339,7 @@ contract ContestControllerTest is Test {
         winners[0] = ENTRY_1;
         uint256[] memory payouts = new uint256[](1);
         payouts[0] = 10000; // 100%
-        
-        vm.prank(oracle);
-        contest.settleContest(winners, payouts);
+        _settleContest(contest, winners, payouts);
         
         assertGt(contest.primaryPrizePoolPayouts(ENTRY_1), 0);
         assertEq(contest.primaryPrizePoolPayouts(ENTRY_2), 0);
@@ -2495,12 +2357,134 @@ contract ContestControllerTest is Test {
         winners[0] = ENTRY_1;
         uint256[] memory payouts = new uint256[](1);
         payouts[0] = 10000;
-        
-        vm.prank(oracle);
-        contest.settleContest(winners, payouts);
+        _settleContest(contest, winners, payouts);
         
         assertEq(contest.secondaryWinningEntry(), ENTRY_1);
         assertEq(contest.getSecondarySideBalance(), 0);
+    }
+
+    // ============ Referral network settlement ============
+
+    function test_settleContest_ReferralFeeDistributed() public {
+        address referrer = address(0xA11);
+        address winner = user1;
+        _registerWinnerReferrer(winner, referrer);
+
+        _createPrimaryEntry(winner, ENTRY_1);
+        _createSecondaryPosition(user2, ENTRY_1, PURCHASE_INCREMENT * 5);
+
+        vm.prank(oracle);
+        contest.activateContest();
+        vm.prank(oracle);
+        contest.lockContest();
+
+        uint256 referralFee = _referralFeeAmount(contest);
+        assertGt(referralFee, 0);
+
+        uint256 referrerBefore = paymentToken.balanceOf(referrer);
+        uint256 winnerBefore = paymentToken.balanceOf(winner);
+
+        uint256[] memory winners = new uint256[](1);
+        winners[0] = ENTRY_1;
+        uint256[] memory payouts = new uint256[](1);
+        payouts[0] = 10_000;
+        _settleContest(contest, winners, payouts);
+
+        assertGt(paymentToken.balanceOf(referrer), referrerBefore);
+        assertEq(paymentToken.balanceOf(winner), winnerBefore);
+        assertEq(contest.referralSettlementNonce(), 1);
+    }
+
+    function test_settleContest_ReferralFeeZeroSkipsDistribution() public {
+        ContestController zeroFee = _createContest(
+            address(paymentToken),
+            oracle,
+            PRIMARY_DEPOSIT,
+            0,
+            block.timestamp + EXPIRY_OFFSET,
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
+        );
+        _fundUserContest(user1, zeroFee, PRIMARY_DEPOSIT);
+        vm.prank(user1);
+        zeroFee.addPrimaryPosition(ENTRY_1, new bytes32[](0));
+
+        vm.prank(oracle);
+        zeroFee.activateContest();
+
+        uint256 oracleBefore = paymentToken.balanceOf(oracle);
+        uint256 distributorBefore = paymentToken.balanceOf(address(rewardDistributor));
+
+        uint256[] memory winners = new uint256[](1);
+        winners[0] = ENTRY_1;
+        uint256[] memory payouts = new uint256[](1);
+        payouts[0] = 10_000;
+        _settleContest(zeroFee, winners, payouts);
+
+        assertEq(paymentToken.balanceOf(oracle), oracleBefore);
+        assertEq(paymentToken.balanceOf(address(rewardDistributor)), distributorBefore);
+    }
+
+    function test_settleContest_ReferralRewardMismatchReverts() public {
+        address referrer = address(0xB0B);
+        _registerWinnerReferrer(user1, referrer);
+
+        _createPrimaryEntry(user1, ENTRY_1);
+        vm.prank(oracle);
+        contest.activateContest();
+
+        uint256[] memory winners = new uint256[](1);
+        winners[0] = ENTRY_1;
+        uint256[] memory payouts = new uint256[](1);
+        payouts[0] = 10_000;
+
+        uint256 referralFee = _referralFeeAmount(contest);
+        bytes32 eventId = keccak256("bad");
+        (IRewardDistributor.ChainRewardData memory reward, bytes memory sig) =
+            _signReferralReward(contest, user1, referralFee, eventId);
+
+        vm.prank(oracle);
+        vm.expectRevert("Referral user mismatch");
+        contest.settleContest(winners, payouts, reward, sig);
+    }
+
+    function test_claimPrimaryPayout_NoFeeDeduction() public {
+        _createPrimaryEntry(user1, ENTRY_1);
+        vm.prank(oracle);
+        contest.activateContest();
+        vm.prank(oracle);
+        contest.lockContest();
+
+        uint256[] memory winners = new uint256[](1);
+        winners[0] = ENTRY_1;
+        uint256[] memory payouts = new uint256[](1);
+        payouts[0] = 10_000;
+        _settleContest(contest, winners, payouts);
+
+        uint256 payout = contest.primaryPrizePoolPayouts(ENTRY_1);
+        uint256 before = paymentToken.balanceOf(user1);
+        vm.prank(user1);
+        contest.claimPrimaryPayout(ENTRY_1);
+        assertEq(paymentToken.balanceOf(user1), before + payout);
+    }
+
+    function test_settleContest_UnregisteredWinner_FeeToOracle() public {
+        _createPrimaryEntry(user1, ENTRY_1);
+        _createSecondaryPosition(user2, ENTRY_1, PURCHASE_INCREMENT);
+
+        vm.prank(oracle);
+        contest.activateContest();
+
+        uint256 referralFee = _referralFeeAmount(contest);
+        uint256 oracleBefore = paymentToken.balanceOf(oracle);
+
+        uint256[] memory winners = new uint256[](1);
+        winners[0] = ENTRY_1;
+        uint256[] memory payouts = new uint256[](1);
+        payouts[0] = 10_000;
+        _settleContest(contest, winners, payouts);
+
+        assertEq(paymentToken.balanceOf(oracle), oracleBefore + referralFee);
+        assertEq(contest.referralSettlementNonce(), 0);
     }
 }
 

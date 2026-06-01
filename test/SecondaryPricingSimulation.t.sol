@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "forge-std/Test.sol";
 import "../src/ContestController.sol";
-import "../src/ContestFactory.sol";
+import "./helpers/ReferralTestHarness.sol";
 import "solmate/tokens/ERC20.sol";
 
 /**
@@ -42,8 +41,7 @@ import "solmate/tokens/ERC20.sol";
  * 5. Whale purchase impact - single large purchase dramatically affects pricing
  * 6. Early buyers maintain percentage share - early buyers not crowded out by whales
  */
-contract SecondaryContestPricingTest is Test {
-    ContestFactory public factory;
+contract SecondaryContestPricingTest is ReferralTestHarness {
     ContestController public contest;
     MockERC20 public paymentToken;
     
@@ -71,20 +69,15 @@ contract SecondaryContestPricingTest is Test {
         // Deploy mock ERC20 token
         paymentToken = new MockERC20("Payment Token", "PAY", 18);
         
-        // Deploy factory
-        factory = new ContestFactory();
-        
-        // Create contest
-        address contestAddress = factory.createContest(
+        _initReferralInfra();
+        contest = _createContest(
             address(paymentToken),
             oracle,
             PRIMARY_DEPOSIT,
-            500, // 5% oracle fee
+            REFERRAL_NETWORK_BPS,
             block.timestamp + 365 days,
             PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
         );
-        
-        contest = ContestController(contestAddress);
         
         // Fund users
         paymentToken.mint(user1, 100000e18);

@@ -42,7 +42,7 @@ The standard initial contract settings are defined in:
 1. **`test/SecondaryPricingBreakeven.t.sol`** - See the `setUp()` function and constants at the top of the file:
 
    - `PRIMARY_DEPOSIT = 25e18` ($25)
-   - `oracleFeeBps = 500` (5%)
+   - `referralNetworkBps = 500` (5% referral network fee at settlement)
    - `PURCHASE_INCREMENT = 10e18` ($10)
    - `primaryDepositSecondarySubsidyBps = 700` (7% of each primary deposit credits `secondaryPrimarySubsidyPerEntry[entryId]`; the remainder credits `primaryPrizePool`)
    - Secondary purchases mint ERC1155 to the caller; each payment is priced along the curve from the entry's current supply.
@@ -50,7 +50,7 @@ The standard initial contract settings are defined in:
 
 2. **`SecondaryPricingBreakeven.md`** - See the "Contest Configuration" section:
    - `PRIMARY_DEPOSIT`: $25
-   - `oracleFeeBps`: 500 (5%)
+   - `referralNetworkBps`: 500 (5%)
    - `primaryDepositSecondarySubsidyBps`: 700 (7%)
    - `COEFFICIENT`: 1
    - `BASE_PRICE`: 1e6

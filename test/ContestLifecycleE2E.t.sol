@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "forge-std/Test.sol";
 import "../src/ContestController.sol";
-import "../src/ContestFactory.sol";
+import "./helpers/ReferralTestHarness.sol";
 import "solmate/tokens/ERC20.sol";
 
 /**
@@ -11,17 +10,15 @@ import "solmate/tokens/ERC20.sol";
  * @dev Rounding slack: pro-rata integer division can leave wei-level dust in the contest until the last
  *      `claimSecondaryPayout` sweep; keep assertions within `ROUNDING_SLACK`.
  */
-contract ContestLifecycleE2E is Test {
+contract ContestLifecycleE2E is ReferralTestHarness {
     uint256 public constant PRIMARY_DEPOSIT = 25e18;
     uint256 public constant PURCHASE_INCREMENT = 10e18;
-    uint256 public constant ORACLE_FEE_BPS = 500;
     uint256 public constant PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS = 700;
     uint256 public constant ENTRY_1 = 1;
     uint256 public constant ENTRY_2 = 2;
     uint256 public constant EXPIRY_OFFSET = 365 days;
     uint256 internal constant ROUNDING_SLACK = 200 wei;
 
-    ContestFactory internal factory;
     ContestController internal contest;
     E2EMockERC20 internal paymentToken;
     address internal oracle = address(0x1);
@@ -32,16 +29,15 @@ contract ContestLifecycleE2E is Test {
 
     function setUp() public {
         paymentToken = new E2EMockERC20("Payment Token", "PAY", 18);
-        factory = new ContestFactory();
-        address c = factory.createContest(
+        _initReferralInfra();
+        contest = _createContest(
             address(paymentToken),
             oracle,
             PRIMARY_DEPOSIT,
-            ORACLE_FEE_BPS,
+            REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
             PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
         );
-        contest = ContestController(c);
         paymentToken.mint(u1, 1_000_000e18);
         paymentToken.mint(u2, 1_000_000e18);
         paymentToken.mint(u3, 1_000_000e18);
@@ -75,7 +71,6 @@ contract ContestLifecycleE2E is Test {
         }
     }
 
-    /// @dev README: SETTLED path — merged secondary TVL, primary payout, oracle fee; contest nearly empty
     function test_E2E_Settled_fullClaims_conservation() public {
         _primary(contest, u1, ENTRY_1);
         _primary(contest, u2, ENTRY_2);
@@ -92,11 +87,12 @@ contract ContestLifecycleE2E is Test {
         uint256[] memory payouts = new uint256[](1);
         payouts[0] = 10_000;
 
-        vm.prank(oracle);
-        contest.settleContest(winners, payouts);
+        _settleContest(contest, winners, payouts);
 
         uint256 twoSubsidy = 2 * ((PRIMARY_DEPOSIT * PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS) / 10_000);
-        assertEq(contest.getSecondarySideBalance(), PURCHASE_INCREMENT * 5 + twoSubsidy);
+        uint256 grossSecondary = PURCHASE_INCREMENT * 5 + twoSubsidy;
+        uint256 netSecondary = (grossSecondary * _netBps(contest)) / 10_000;
+        assertEq(contest.getSecondarySideBalance(), netSecondary);
 
         vm.prank(u1);
         contest.claimPrimaryPayout(ENTRY_1);
@@ -107,14 +103,10 @@ contract ContestLifecycleE2E is Test {
         assertEq(contest.totalSecondaryLiquidity(), 0);
         assertEq(contest.getSecondarySideBalance(), 0);
 
-        vm.prank(oracle);
-        contest.claimOracleFee();
-
         uint256 left = paymentToken.balanceOf(address(contest));
         assertLe(left, ROUNDING_SLACK);
     }
 
-    /// @dev README oracle push — primary payouts via `pushPrimaryPayouts` match pull `claimPrimaryPayout` net to owner
     function test_E2E_Settled_primaryPushVsPull_sameNetToOwner() public {
         address pullUser = u1;
         address pushUser = u4;
@@ -130,47 +122,42 @@ contract ContestLifecycleE2E is Test {
         uint256[] memory payouts = new uint256[](1);
         payouts[0] = 10_000;
 
-        vm.prank(oracle);
-        contest.settleContest(winners, payouts);
+        _settleContest(contest, winners, payouts);
 
-        uint256 payoutGross = contest.primaryPrizePoolPayouts(ENTRY_1);
-        uint256 fee = (payoutGross * ORACLE_FEE_BPS) / 10_000;
-        uint256 expectedNet = payoutGross - fee;
+        uint256 payout = contest.primaryPrizePoolPayouts(ENTRY_1);
 
         uint256 balBeforePull = paymentToken.balanceOf(pullUser);
         vm.prank(pullUser);
         contest.claimPrimaryPayout(ENTRY_1);
         uint256 pullNet = paymentToken.balanceOf(pullUser) - balBeforePull;
-        assertEq(pullNet, expectedNet);
+        assertEq(pullNet, payout);
 
-        address cPushAddr = factory.createContest(
+        ContestController cPush = _createContest(
             address(paymentToken),
             oracle,
             PRIMARY_DEPOSIT,
-            ORACLE_FEE_BPS,
+            REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
             PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
         );
-        ContestController cPush = ContestController(cPushAddr);
         _primary(cPush, pushUser, ENTRY_1);
 
         vm.prank(oracle);
         cPush.activateContest();
         vm.prank(oracle);
         cPush.lockContest();
-        vm.prank(oracle);
-        cPush.settleContest(winners, payouts);
+        _settleContest(cPush, winners, payouts);
 
+        uint256 pushPayout = cPush.primaryPrizePoolPayouts(ENTRY_1);
         uint256 balBeforePush = paymentToken.balanceOf(pushUser);
         uint256[] memory entryIds = new uint256[](1);
         entryIds[0] = ENTRY_1;
         vm.prank(oracle);
         cPush.pushPrimaryPayouts(entryIds);
         uint256 pushNet = paymentToken.balanceOf(pushUser) - balBeforePush;
-        assertEq(pushNet, expectedNet);
+        assertEq(pushNet, pushPayout);
     }
 
-    /// @dev README CANCELLED — full refunds, no oracle fee on removes
     function test_E2E_Cancelled_refundsNoOracleFee() public {
         uint256 u1Pre = paymentToken.balanceOf(u1);
         uint256 u3Pre = paymentToken.balanceOf(u3);
@@ -189,12 +176,10 @@ contract ContestLifecycleE2E is Test {
         contest.removePrimaryPosition(ENTRY_1);
 
         assertEq(paymentToken.balanceOf(u1), u1Pre);
-        // Bonding-curve sell-back can be a few wei short of exact deposits at this size
         assertApproxEqAbs(paymentToken.balanceOf(u3), u3Pre, 2e18);
-        assertEq(contest.accumulatedOracleFee(), 0);
+        assertEq(contest.referralSettlementNonce(), 0);
     }
 
-    /// @dev README `cancelExpired` — anyone may move to CANCELLED after expiry when not settled/closed
     function test_E2E_CancelExpired_thenRefunds() public {
         uint256 u1Pre = paymentToken.balanceOf(u1);
         uint256 u3Pre = paymentToken.balanceOf(u3);
@@ -217,7 +202,6 @@ contract ContestLifecycleE2E is Test {
         assertApproxEqAbs(paymentToken.balanceOf(u3), u3Pre, 2e18);
     }
 
-    /// @dev README CLOSED — residual ERC20 sent to oracle; accounting zeroed
     function test_E2E_CloseContest_routesResidualToOracle() public {
         _primary(contest, u1, ENTRY_1);
         uint256 oracleBefore = paymentToken.balanceOf(oracle);
@@ -232,7 +216,6 @@ contract ContestLifecycleE2E is Test {
         assertEq(contest.getPrimarySideBalance(), 0);
     }
 
-    /// @dev Merged secondary with no winning-entry supply spills to primary; primary owner realizes it
     function test_E2E_Settled_noWinningSecondarySupply_spillToPrimary() public {
         _primary(contest, u1, ENTRY_1);
         _primary(contest, u2, ENTRY_2);
@@ -250,11 +233,14 @@ contract ContestLifecycleE2E is Test {
 
         uint256 primaryPool = contest.primaryPrizePool();
         uint256 twoSubsidy = 2 * ((PRIMARY_DEPOSIT * PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS) / 10_000);
-        vm.prank(oracle);
-        contest.settleContest(winners, payouts);
+        _settleContest(contest, winners, payouts);
 
         assertEq(contest.getSecondarySideBalance(), 0);
-        assertEq(contest.primaryPrizePoolPayouts(ENTRY_1), primaryPool + PURCHASE_INCREMENT + twoSubsidy);
+        uint256 grossSecondary = PURCHASE_INCREMENT + twoSubsidy;
+        uint256 netBps = _netBps(contest);
+        uint256 expected =
+            (primaryPool * netBps) / 10_000 + (grossSecondary * netBps) / 10_000;
+        assertEq(contest.primaryPrizePoolPayouts(ENTRY_1), expected);
 
         uint256 before = paymentToken.balanceOf(u1);
         vm.prank(u1);
