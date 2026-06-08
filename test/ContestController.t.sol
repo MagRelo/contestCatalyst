@@ -2098,7 +2098,6 @@ contract ContestControllerTest is ReferralTestHarness {
     function test_invariant_NoAccumulatedReferralFeeBeforeSettle() public {
         _createPrimaryEntry(user1, ENTRY_1);
         
-        assertEq(contest.referralSettlementNonce(), 0);
     }
     
     function test_invariant_PriceMonotonic() public {
@@ -2392,7 +2391,6 @@ contract ContestControllerTest is ReferralTestHarness {
 
         assertGt(paymentToken.balanceOf(referrer), referrerBefore);
         assertEq(paymentToken.balanceOf(winner), winnerBefore);
-        assertEq(contest.referralSettlementNonce(), 1);
     }
 
     function test_settleContest_ReferralFeeZeroSkipsDistribution() public {
@@ -2439,8 +2437,9 @@ contract ContestControllerTest is ReferralTestHarness {
 
         uint256 referralFee = _referralFeeAmount(contest);
         bytes32 eventId = keccak256("bad");
-        (IRewardDistributor.ChainRewardData memory reward, bytes memory sig) =
-            _signReferralReward(contest, user1, referralFee, eventId);
+        IRewardDistributor.ChainRewardData memory reward =
+            _buildReferralReward(contest, user1, referralFee, eventId);
+        bytes memory sig = _signReferralReward(reward);
 
         vm.prank(oracle);
         vm.expectRevert("Referral user mismatch");
@@ -2484,7 +2483,6 @@ contract ContestControllerTest is ReferralTestHarness {
         _settleContest(contest, winners, payouts);
 
         assertEq(paymentToken.balanceOf(oracle), oracleBefore + referralFee);
-        assertEq(contest.referralSettlementNonce(), 0);
     }
 }
 

@@ -30,8 +30,9 @@ abstract contract ReferralTestHarness is Test {
         referralOwner = address(this);
         referralOracleSigner = vm.addr(referralOracleKey);
 
-        referralGraph = new ReferralGraph(referralOwner, referralOracleSigner);
-        rewardDistributor = new RewardDistributor(referralOwner, address(referralGraph), referralOracleSigner);
+        referralGraph = new ReferralGraph(referralOwner, referralOracleSigner, REFERRAL_GROUP_ID);
+        rewardDistributor =
+            new RewardDistributor(referralOwner, address(referralGraph), referralOracleSigner, REFERRAL_GROUP_ID);
         factory = new ContestFactory();
     }
 
@@ -75,39 +76,40 @@ abstract contract ReferralTestHarness is Test {
         return (totalGross * c.referralNetworkBps()) / 10_000;
     }
 
-    function _signReferralReward(
+    function _referralRewardHash(IRewardDistributor.ChainRewardData memory reward)
+        internal
+        pure
+        returns (bytes32)
+    {
+        return keccak256(
+            abi.encodePacked(reward.user, reward.totalAmount, reward.rewardToken, reward.groupId, reward.eventId)
+        );
+    }
+
+    function _signReferralReward(IRewardDistributor.ChainRewardData memory reward)
+        internal
+        view
+        returns (bytes memory signature)
+    {
+        bytes32 rewardHash = _referralRewardHash(reward);
+        bytes32 digest = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", rewardHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(referralOracleKey, digest);
+        signature = abi.encodePacked(r, s, v);
+    }
+
+    function _buildReferralReward(
         ContestController c,
         address payoutAnchor,
         uint256 referralFee,
         bytes32 eventId
-    ) internal view returns (IRewardDistributor.ChainRewardData memory reward, bytes memory signature) {
-        uint256 nonce = c.referralSettlementNonce();
-        uint256 timestamp = block.timestamp;
-
+    ) internal view returns (IRewardDistributor.ChainRewardData memory reward) {
         reward = IRewardDistributor.ChainRewardData({
             user: payoutAnchor,
             totalAmount: referralFee,
             rewardToken: c.paymentToken(),
             groupId: REFERRAL_GROUP_ID,
-            eventId: eventId,
-            timestamp: timestamp,
-            nonce: nonce
+            eventId: eventId
         });
-
-        bytes32 rewardHash = keccak256(
-            abi.encodePacked(
-                reward.user,
-                reward.totalAmount,
-                reward.rewardToken,
-                reward.groupId,
-                reward.eventId,
-                reward.timestamp,
-                reward.nonce
-            )
-        );
-        bytes32 digest = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", rewardHash));
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(referralOracleKey, digest);
-        signature = abi.encodePacked(r, s, v);
     }
 
     function _settleContest(ContestController c, uint256[] memory winningEntries, uint256[] memory payoutBps)
@@ -122,8 +124,9 @@ abstract contract ReferralTestHarness is Test {
             address payoutAnchor = referralGraph.getReferrer(winner, REFERRAL_GROUP_ID);
 
             if (payoutAnchor != address(0) && payoutAnchor != REFERRAL_ROOT) {
-                bytes32 eventId = keccak256(abi.encodePacked(address(c), c.referralSettlementNonce()));
-                (reward, signature) = _signReferralReward(c, payoutAnchor, referralFee, eventId);
+                bytes32 eventId = keccak256(abi.encodePacked(address(c), block.timestamp, winningEntries[0]));
+                reward = _buildReferralReward(c, payoutAnchor, referralFee, eventId);
+                signature = _signReferralReward(reward);
             }
         }
 

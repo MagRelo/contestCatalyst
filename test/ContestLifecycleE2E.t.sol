@@ -177,7 +177,6 @@ contract ContestLifecycleE2E is ReferralTestHarness {
 
         assertEq(paymentToken.balanceOf(u1), u1Pre);
         assertApproxEqAbs(paymentToken.balanceOf(u3), u3Pre, 2e18);
-        assertEq(contest.referralSettlementNonce(), 0);
     }
 
     function test_E2E_CancelExpired_thenRefunds() public {

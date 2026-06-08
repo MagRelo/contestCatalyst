@@ -51,7 +51,6 @@ contract ContestController is ERC1155, ReentrancyGuard {
     }
 
     ContestState public state;
-    uint256 public referralSettlementNonce;
 
     uint256[] public entries;
     /// @dev Index in `entries` plus one; zero means not currently active.
@@ -357,12 +356,9 @@ contract ContestController is ERC1155, ReentrancyGuard {
                 require(referralReward.user == payoutAnchor, "Referral user mismatch");
                 require(referralReward.rewardToken == paymentToken, "Referral token mismatch");
                 require(referralReward.groupId == referralGroupId, "Referral group mismatch");
-                require(referralReward.timestamp == block.timestamp, "Referral timestamp mismatch");
-                require(referralReward.nonce == referralSettlementNonce, "Referral nonce mismatch");
 
                 SafeTransferLib.safeTransfer(ERC20(paymentToken), rewardDistributor, referralFee);
                 IRewardDistributor(rewardDistributor).distributeChainRewards(referralReward, referralSignature);
-                referralSettlementNonce++;
 
                 emit ReferralNetworkFeeDistributed(winner, payoutAnchor, referralFee, referralReward.eventId);
             } else {
