@@ -29,6 +29,8 @@ contract ContestController is ERC1155, ReentrancyGuard {
     address public constant REFERRAL_ROOT = address(0x0000000000000000000000000000000000000001);
 
     address public immutable paymentToken;
+    /// @notice ERC20 decimals of `paymentToken` (used to normalize secondary buys into 18-dec share units)
+    uint8 public immutable paymentTokenDecimals;
     address public immutable oracle;
     uint256 public immutable primaryDepositAmount;
     uint256 public immutable referralNetworkBps;
@@ -135,6 +137,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
         require(_rewardCalculator != address(0), "Invalid reward calculator");
 
         paymentToken = _paymentToken;
+        paymentTokenDecimals = ERC20(_paymentToken).decimals();
         oracle = _oracle;
         primaryDepositAmount = _primaryDepositAmount;
         referralNetworkBps = _referralNetworkBps;
@@ -208,7 +211,10 @@ contract ContestController is ERC1155, ReentrancyGuard {
         int256 netPos = netPosition[entryId];
         uint256 shares0 = netPos > 0 ? uint256(netPos) : 0;
 
-        uint256 buyerTokens = SecondaryPricing.calculateTokensFromCollateral(shares0, amount);
+        // Curve math always uses 18-decimal share units; payment stays in token decimals for transfers/liquidity.
+        uint256 paymentShareUnits =
+            SecondaryPricing.toShareUnits(amount, paymentTokenDecimals);
+        uint256 buyerTokens = SecondaryPricing.calculateTokensFromCollateral(shares0, paymentShareUnits);
         require(buyerTokens > 0, "Payment too small: insufficient to purchase tokens");
 
         secondaryLiquidityPerEntry[entryId] += amount;

@@ -128,6 +128,34 @@ contract SecondaryPricingTest is Test {
         return (delta * sum) / (6 * PRICE_PRECISION);
     }
 
+    // ============ toShareUnits Tests ============
+
+    function test_toShareUnits_18DecimalsUnchanged() public {
+        assertEq(SecondaryPricing.toShareUnits(10e18, 18), 10e18);
+        assertEq(SecondaryPricing.toShareUnits(0, 18), 0);
+    }
+
+    function test_toShareUnits_6DecimalsScalesTo18() public {
+        // $10 USDC (6 dec) -> 10e18 share units
+        assertEq(SecondaryPricing.toShareUnits(10e6, 6), 10e18);
+        assertEq(SecondaryPricing.toShareUnits(25e6, 6), 25e18);
+        assertEq(SecondaryPricing.toShareUnits(1, 6), 1e12);
+    }
+
+    function test_toShareUnits_GreaterThan18Truncates() public {
+        // 24-decimal token: 1e24 face units -> 1e18 share units
+        assertEq(SecondaryPricing.toShareUnits(1e24, 24), 1e18);
+    }
+
+    function test_toShareUnits_SixDecPaymentMatchesEighteenDecMint() public {
+        uint256 payment6 = 10e6;
+        uint256 payment18 = SecondaryPricing.toShareUnits(payment6, 6);
+        uint256 tokensFrom6 = SecondaryPricing.calculateTokensFromCollateral(0, payment18);
+        uint256 tokensFrom18 = SecondaryPricing.calculateTokensFromCollateral(0, 10e18);
+        assertEq(tokensFrom6, tokensFrom18, "Normalized 6-dec payment must mint like 18-dec");
+        assertGt(tokensFrom6, 9e18, "Should mint nearly $10 of shares at base price");
+    }
+
     // ============ calculatePrice Tests ============
 
     function test_calculatePrice_InitialState() public {

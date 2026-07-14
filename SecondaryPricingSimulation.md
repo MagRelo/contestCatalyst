@@ -11,7 +11,7 @@ The secondary market uses a **Polynomial Bonding Curve** pricing model:
 Where:
 
 - `BASE_PRICE = 1e6` (1.0 minimum price, scaled by PRICE_PRECISION)
-- `COEFFICIENT = 1` (controls curve steepness, scaled appropriately)
+- `COEFFICIENT = 15` (controls curve steepness; tuned via `SecondaryPricingTuning.md`)
 - `PRICE_PRECISION = 1e6` (represents 1.0)
 - `shares` = current number of shares for this entry
 
@@ -46,7 +46,7 @@ The price follows a quadratic bonding curve:
 
 ### Example Price Calculations
 
-With `BASE_PRICE = 1e6` and `COEFFICIENT = 1`:
+With `BASE_PRICE = 1e6` and `COEFFICIENT = 15`:
 
 - **0 shares**: `price = 1e6 + (0^2 * 1) / 1e18 = 1,000,000` (1.0)
 - **1e18 shares**: `price = 1e6 + ((1e18/1e9)^2 * 1) / 1e18 = 1e6 + 1 = 1,000,001` (≈ 1.0)
@@ -268,7 +268,7 @@ When a **primary** participant deposits `primaryDepositAmount` for an entry, `pr
 
 When a **secondary** participant pays `amount` for an entry:
 
-1. **Minting:** Tokens are computed with `SecondaryPricing.calculateTokensFromCollateral` from the entry’s current nonnegative `netPosition`; ERC1155 is minted to the caller for that amount.
+1. **Minting:** Payment is converted to 18-decimal share units via `toShareUnits`, then `SecondaryPricing.calculateTokensFromCollateral` prices from the entry’s current nonnegative `netPosition`; ERC1155 is minted to the caller for that share amount.
 2. **Liquidity:** The full `amount` is credited to that entry’s `secondaryLiquidityPerEntry[entryId]` (payment-token backing for OPEN/CANCELLED sell-backs on that entry). At settlement, all entries’ backed + subsidy balances are merged into the winning primary entry’s slot for pro-rata redemption by that entry’s ERC1155 holders.
 
 Oracle fees apply on settled secondary payout claims (`claimSecondaryPayout` / `pushSecondaryPayouts`), not at deposit time.
@@ -281,7 +281,7 @@ Oracle fees apply on settled secondary payout claims (`claimSecondaryPayout` / `
 | ----------------- | ----- | --------------------------------------- |
 | `PRICE_PRECISION` | 1e6   | Represents 1.0 in price calculations    |
 | `BASE_PRICE`      | 1e6   | Minimum price (1.0)                     |
-| `COEFFICIENT`     | 1     | Coefficient for quadratic term (scaled) |
+| `COEFFICIENT`     | 15    | Coefficient for quadratic term (see SecondaryPricingTuning.md) |
 
 ### Contest Settings
 
@@ -318,7 +318,7 @@ If you need to adjust behavior:
 Where:
 
 - `BASE_PRICE = 1e6` (1.0 minimum price)
-- `COEFFICIENT = 1` (controls curve steepness)
+- `COEFFICIENT = 15` (controls curve steepness)
 - Price increases quadratically with shares: `price = BASE_PRICE + COEFFICIENT * shares^2`
 
 ### Tokens Minted

@@ -52,7 +52,7 @@ The standard initial contract settings are defined in:
    - `PRIMARY_DEPOSIT`: $25
    - `referralNetworkBps`: 500 (5%)
    - `primaryDepositSecondarySubsidyBps`: 700 (7%)
-   - `COEFFICIENT`: 1
+   - `COEFFICIENT`: 15
    - `BASE_PRICE`: 1e6
    - `PRICE_PRECISION`: 1e6
 

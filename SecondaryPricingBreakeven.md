@@ -9,7 +9,7 @@ This analysis uses the following contest settings:
 | `PRIMARY_DEPOSIT`                  | $25   | Fixed amount each primary participant must deposit                            |
 | `referralNetworkBps`               | 500   | Referral network fee: 5% of gross distributable TVL at settlement (500 basis points) |
 | `primaryDepositSecondarySubsidyBps`| 700   | 7% of each primary deposit credits `secondaryPrimarySubsidyPerEntry` (unbacked) |
-| `COEFFICIENT`                      | 1     | Quadratic bonding curve coefficient                                           |
+| `COEFFICIENT`                      | 15    | Quadratic bonding curve coefficient                                           |
 | `BASE_PRICE`                       | 1e6   | Minimum price: 1.0 (scaled by PRICE_PRECISION)                                  |
 | `PRICE_PRECISION`                  | 1e6   | Price precision: 1.0 = 1,000,000                                              |
 
@@ -17,9 +17,9 @@ While the contest is open, each primary deposit splits: the carve sits in `secon
 
 ## Overview
 
-This document analyzes when additional betting on a single entry becomes economically prohibitive due to the quadratic bonding curve pricing mechanism with `COEFFICIENT = 1`.
+This document analyzes when additional betting on a single entry becomes economically prohibitive due to the quadratic bonding curve pricing mechanism with `COEFFICIENT = 15`.
 
-**Note:** Numbers below follow `test/SecondaryPricingBreakeven.t.sol`. Re-run `forge test --match-path test/SecondaryPricingBreakeven.t.sol -vv` after changing contest parameters or curve constants and update this document if needed.
+**Note:** Narrative tables below may lag the live coefficient; re-run `forge test --match-path test/SecondaryPricingBreakeven.t.sol -vv` and refresh figures after parameter changes.
 
 ## Test Setup
 
@@ -198,7 +198,7 @@ The price increases from ~1.0004 to ~1.233 over 50 purchases, showing the quadra
 
 ### 5. COEFFICIENT Impact
 
-With `COEFFICIENT = 1` and competitive betting (two bettors alternating):
+With `COEFFICIENT = 15` and competitive betting (two bettors alternating):
 
 - Break-even occurs at ~$120 **competitive** wagering on Entry 1 (initial $20 + $100; Purchases #11–12), with baseline aggregate TVL **$8.75** higher than the $100 backed-only case because of primary subsidy
 - Price increases from ~1.0004x to ~1.014-1.019x at break-even
@@ -299,7 +299,7 @@ On `addSecondaryPosition(entryId, amount)`:
 
 1. The caller transfers **`amount`** payment token into the contest.
 2. The full **`amount`** is credited to `secondaryLiquidityPerEntry[entryId]` (collateral for OPEN/CANCELLED sell-backs; merged at settlement).
-3. **Minting:** `SecondaryPricing.calculateTokensFromCollateral` uses current nonnegative `netPosition[entryId]` as the starting supply; ERC1155 is minted to `msg.sender` for the computed amount.
+3. **Minting:** `SecondaryPricing.toShareUnits` normalizes the payment to 18-decimal share units, then `calculateTokensFromCollateral` uses current nonnegative `netPosition[entryId]` as starting supply; ERC1155 is minted to `msg.sender` for the computed share amount.
 4. **Oracle fees** apply on settled payout claims (`claim*` / `push*`), not on each secondary trade during OPEN/ACTIVE.
 
 Secondary trades do not debit or credit `primaryPrizePool`; that pool changes on primary add/remove and on settlement payouts.
@@ -308,7 +308,7 @@ On `addPrimaryPosition`, **7%** of `PRIMARY_DEPOSIT` credits `secondaryPrimarySu
 
 ## Conclusion
 
-With `COEFFICIENT = 1`, `primaryDepositSecondarySubsidyBps = 700`, and competitive betting (two bettors alternating), the break-even points still occur at approximately **$120 total Entry-1 wagering** (initial $20 + $100 competitive; Purchases #11–12), while aggregate `getSecondarySideBalance` is **$8.75** higher throughout because of the primary subsidy carve. This means:
+With `COEFFICIENT = 15`, `primaryDepositSecondarySubsidyBps = 700`, and competitive betting (two bettors alternating), break-even occurs earlier than the pre-tuning `COEFFICIENT = 1` path (tuning sweep: ~purchase #9 vs #11–12). Re-run `test/SecondaryPricingBreakeven.t.sol` and refresh the purchase tables above for exact figures. Aggregate `getSecondarySideBalance` remains **$8.75** higher throughout because of the primary subsidy carve. This means:
 
 - ✅ **$20–110 Entry-1 wagering (Purchases #1–10):** Profitable for both bettors (returns taper from ~267% toward ~0%)
 - ⚠️ **$120 Entry-1 wagering (Purchases #11–12):** Break-even points for both bettors (0% return)

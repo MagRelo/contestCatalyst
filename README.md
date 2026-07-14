@@ -26,7 +26,7 @@ Why? By combining and balancing incentives, the system achieves more than either
   - Manages primary prize pool and per-entry secondary liquidity; adding secondary positions does not move tokens into or out of the primary pool until settlement and claims
 - **[PrimaryContest](src/PrimaryContest.sol)**: Library for primary mechanics (add/remove positions, claims)
 - **[SecondaryContest](src/SecondaryContest.sol)**: Library for secondary mechanics (position management, ERC1155 operations)
-- **[SecondaryPricing](src/SecondaryPricing.sol)**: Polynomial bonding curve pricing (`price = BASE_PRICE + COEFFICIENT * shares²`)
+- **[SecondaryPricing](src/SecondaryPricing.sol)**: Polynomial bonding curve (`price = BASE_PRICE + COEFFICIENT * shares²`); share supply is always 18-decimal units via `toShareUnits`, independent of payment-token decimals
 
 ### State Machine
 

@@ -922,6 +922,58 @@ contract ContestControllerTest is ReferralTestHarness {
         
         assertGt(contest.balanceOf(user2, ENTRY_1), 0);
     }
+
+    function test_addSecondaryPosition_SixDecimalPaymentMintsEighteenDecShares() public {
+        MockERC20 usdc = new MockERC20("USD Coin", "USDC", 6);
+        uint256 primaryDeposit6 = 25e6; // $25
+        uint256 purchase6 = 10e6; // $10
+
+        ContestController usdcContest = _createContest(
+            address(usdc),
+            oracle,
+            primaryDeposit6,
+            REFERRAL_NETWORK_BPS,
+            block.timestamp + EXPIRY_OFFSET,
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
+        );
+        assertEq(usdcContest.paymentTokenDecimals(), 6);
+
+        usdc.mint(user1, primaryDeposit6);
+        vm.startPrank(user1);
+        usdc.approve(address(usdcContest), primaryDeposit6);
+        usdcContest.addPrimaryPosition(ENTRY_1, new bytes32[](0));
+        vm.stopPrank();
+
+        vm.prank(oracle);
+        usdcContest.activateContest();
+
+        usdc.mint(user2, purchase6);
+        vm.startPrank(user2);
+        usdc.approve(address(usdcContest), purchase6);
+        usdcContest.addSecondaryPosition(ENTRY_1, purchase6, new bytes32[](0));
+        vm.stopPrank();
+
+        uint256 shares6 = usdcContest.balanceOf(user2, ENTRY_1);
+
+        // Same face-value $10 on the default 18-decimal contest
+        _createPrimaryEntry(user1, ENTRY_2);
+        vm.prank(oracle);
+        contest.activateContest();
+        _fundUser(user3, PURCHASE_INCREMENT);
+        vm.prank(user3);
+        contest.addSecondaryPosition(ENTRY_2, PURCHASE_INCREMENT, new bytes32[](0));
+        uint256 shares18 = contest.balanceOf(user3, ENTRY_2);
+
+        assertEq(shares6, shares18, "Identical face-value buys must mint identical 18-dec share amounts");
+        assertGt(shares6, 9e18, "First $10 buy near base should mint nearly 10e18 shares");
+
+        // Liquidity tracking stays in payment-token decimals
+        assertEq(usdcContest.secondaryLiquidityPerEntry(ENTRY_1), purchase6);
+        assertEq(contest.secondaryLiquidityPerEntry(ENTRY_2), PURCHASE_INCREMENT);
+
+        // Spot price after equal face-value buys should match
+        assertEq(usdcContest.calculateSecondaryPrice(ENTRY_1), contest.calculateSecondaryPrice(ENTRY_2));
+    }
     
     function test_addSecondaryPosition_PriceIncreases() public {
         _createPrimaryEntry(user1, ENTRY_1);
