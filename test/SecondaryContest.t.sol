@@ -64,14 +64,10 @@ contract TestStorage {
         uint256 tokenAmount,
         uint256 balance,
         uint8 state
-    ) external view {
-        SecondaryContest.validateRemoveSecondaryPosition(
-            entryOwner,
-            entryId,
-            tokenAmount,
-            balance,
-            state
-        );
+    ) external pure {
+        // entryId unused by validator; kept for test-call site compatibility
+        entryId;
+        SecondaryContest.validateRemoveSecondaryPosition(tokenAmount, balance, state);
     }
 
     function validateClaimSecondaryPayout(
@@ -80,10 +76,8 @@ contract TestStorage {
         uint8 state,
         bool resolved,
         uint256 winningEntry
-    ) external view {
-        SecondaryContest.validateClaimSecondaryPayout(
-            entryOwner, entryId, balance, state, resolved, winningEntry
-        );
+    ) external pure {
+        SecondaryContest.validateClaimSecondaryPayout(entryId, balance, state, resolved, winningEntry);
     }
 
     function processAddSecondaryPosition(
@@ -598,10 +592,10 @@ contract SecondaryContestTest is Test {
         );
     }
 
-    function test_validateRemoveSecondaryPosition_Invalid_EntryDoesNotExist() public {
+    function test_validateRemoveSecondaryPosition_Valid_NoEntryOwner() public {
         _setState(ContestState.OPEN);
-        
-        vm.expectRevert("Entry does not exist");
+        // No entry owner set — remove depends only on share balance
+
         testStorage.validateRemoveSecondaryPosition(
             ENTRY_3,
             TOKENS_1,
@@ -807,10 +801,10 @@ contract SecondaryContestTest is Test {
         );
     }
 
-    function test_validateClaimSecondaryPayout_Invalid_EntryDoesNotExist() public {
+    function test_validateClaimSecondaryPayout_Valid_NoEntryOwner() public {
         _setState(ContestState.SETTLED);
-        
-        vm.expectRevert("Entry does not exist or was withdrawn");
+        // No entry owner — claim depends only on shares vs winning entry
+
         testStorage.validateClaimSecondaryPayout(
             ENTRY_3,
             TOKENS_1,
@@ -820,12 +814,11 @@ contract SecondaryContestTest is Test {
         );
     }
 
-    function test_validateClaimSecondaryPayout_Invalid_EntryWithdrawn() public {
+    function test_validateClaimSecondaryPayout_Valid_EntryWithdrawn() public {
         _setState(ContestState.SETTLED);
         _createEntry(ENTRY_1, entryOwner1);
         _removeEntry(ENTRY_1);
-        
-        vm.expectRevert("Entry does not exist or was withdrawn");
+
         testStorage.validateClaimSecondaryPayout(
             ENTRY_1,
             TOKENS_1,

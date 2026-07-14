@@ -268,6 +268,7 @@ contract ContestControllerTest is ReferralTestHarness {
             contest.cancelContest();
         } else if (state == ContestState.CLOSED) {
             vm.warp(block.timestamp + EXPIRY_OFFSET);
+            contest.cancelExpired();
             contest.closeContest();
         }
     }
@@ -1011,9 +1012,7 @@ contract ContestControllerTest is ReferralTestHarness {
         
         uint256 tokensBefore = contest.balanceOf(user2, ENTRY_1);
         uint256 balanceBefore = paymentToken.balanceOf(user2);
-        uint256 L = contest.secondaryLiquidityPerEntry(ENTRY_1);
-        uint256 S = uint256(contest.netPosition(ENTRY_1));
-        uint256 expectedOut = (tokensBefore * L) / S;
+        uint256 expectedOut = PURCHASE_INCREMENT;
         
         vm.prank(user2);
         vm.expectEmit(true, true, false, true);
@@ -1060,9 +1059,7 @@ contract ContestControllerTest is ReferralTestHarness {
         
         uint256 tokens = contest.balanceOf(user2, ENTRY_1);
         uint256 balanceBefore = paymentToken.balanceOf(user2);
-        uint256 L = contest.secondaryLiquidityPerEntry(ENTRY_1);
-        uint256 S = uint256(contest.netPosition(ENTRY_1));
-        uint256 expectedOut = (tokens * L) / S;
+        uint256 expectedOut = PURCHASE_INCREMENT;
         
         vm.prank(user2);
         contest.removeSecondaryPosition(ENTRY_1, tokens);
@@ -1082,7 +1079,7 @@ contract ContestControllerTest is ReferralTestHarness {
         contest.removeSecondaryPosition(ENTRY_1, tokens);
     }
     
-    function test_removeSecondaryPosition_EntryDoesNotExist() public {
+    function test_removeSecondaryPosition_AfterPrimaryRemoved() public {
         _createPrimaryEntry(user1, ENTRY_1);
         _createSecondaryPosition(user2, ENTRY_1, PURCHASE_INCREMENT);
 
@@ -1093,10 +1090,14 @@ contract ContestControllerTest is ReferralTestHarness {
         contest.removePrimaryPosition(ENTRY_1);
         
         uint256 tokens = contest.balanceOf(user2, ENTRY_1);
+        uint256 balanceBefore = paymentToken.balanceOf(user2);
         
         vm.prank(user2);
-        vm.expectRevert("Entry does not exist");
         contest.removeSecondaryPosition(ENTRY_1, tokens);
+
+        assertEq(contest.balanceOf(user2, ENTRY_1), 0);
+        assertEq(paymentToken.balanceOf(user2), balanceBefore + PURCHASE_INCREMENT);
+        assertEq(contest.entryOwner(ENTRY_1), address(0));
     }
     
     function test_removeSecondaryPosition_InsufficientBalance() public {
@@ -1135,14 +1136,37 @@ contract ContestControllerTest is ReferralTestHarness {
         
         uint256 tokens = contest.balanceOf(user2, ENTRY_1);
         uint256 balanceBefore = paymentToken.balanceOf(user2);
-        uint256 L = contest.secondaryLiquidityPerEntry(ENTRY_1);
-        uint256 S = uint256(contest.netPosition(ENTRY_1));
-        uint256 expectedOut = (tokens * L) / S;
         
         vm.prank(user2);
         contest.removeSecondaryPosition(ENTRY_1, tokens);
         
-        assertEq(paymentToken.balanceOf(user2), balanceBefore + expectedOut);
+        assertEq(paymentToken.balanceOf(user2), balanceBefore + depositAmount);
+    }
+
+    function test_removeSecondaryPosition_CancelledRefundsOwnPrincipal() public {
+        _createPrimaryEntry(user1, ENTRY_1);
+
+        uint256 aliceDeposit = PURCHASE_INCREMENT * 5; // $50
+        uint256 bobDeposit = PURCHASE_INCREMENT * 100; // $1000
+
+        _createSecondaryPosition(user2, ENTRY_1, aliceDeposit);
+        _createSecondaryPosition(user3, ENTRY_1, bobDeposit);
+
+        uint256 aliceBefore = paymentToken.balanceOf(user2);
+        uint256 bobBefore = paymentToken.balanceOf(user3);
+        uint256 aliceTokens = contest.balanceOf(user2, ENTRY_1);
+        uint256 bobTokens = contest.balanceOf(user3, ENTRY_1);
+
+        vm.prank(oracle);
+        contest.cancelContest();
+
+        vm.prank(user2);
+        contest.removeSecondaryPosition(ENTRY_1, aliceTokens);
+        vm.prank(user3);
+        contest.removeSecondaryPosition(ENTRY_1, bobTokens);
+
+        assertEq(paymentToken.balanceOf(user2), aliceBefore + aliceDeposit);
+        assertEq(paymentToken.balanceOf(user3), bobBefore + bobDeposit);
     }
     
     // ============ claimSecondaryPayout Tests ============
@@ -1764,6 +1788,8 @@ contract ContestControllerTest is ReferralTestHarness {
     function test_closeContest_Success() public {
         _createPrimaryEntry(user1, ENTRY_1);
         vm.warp(block.timestamp + EXPIRY_OFFSET);
+
+        contest.cancelExpired();
         
         uint256 balanceBefore = paymentToken.balanceOf(oracle);
         uint256 contractBalance = _getContractBalance();
@@ -1777,9 +1803,21 @@ contract ContestControllerTest is ReferralTestHarness {
         assertEq(paymentToken.balanceOf(oracle), balanceBefore + contractBalance);
         assertEq(_getContractBalance(), 0);
     }
+
+    function test_closeContest_RevertsFromOpen() public {
+        _createPrimaryEntry(user1, ENTRY_1);
+        vm.warp(block.timestamp + EXPIRY_OFFSET);
+
+        vm.prank(oracle);
+        vm.expectRevert("Not terminal state");
+        contest.closeContest();
+    }
     
     function test_closeContest_ExpiryNotReached() public {
         _createPrimaryEntry(user1, ENTRY_1);
+
+        vm.prank(oracle);
+        contest.cancelContest();
         
         vm.prank(oracle);
         vm.expectRevert("Expiry not reached");
@@ -1789,6 +1827,7 @@ contract ContestControllerTest is ReferralTestHarness {
     function test_closeContest_NotOracle() public {
         _createPrimaryEntry(user1, ENTRY_1);
         vm.warp(block.timestamp + EXPIRY_OFFSET);
+        contest.cancelExpired();
         
         vm.prank(nonOracle);
         vm.expectRevert("Not oracle");
@@ -2490,10 +2529,8 @@ contract ContestControllerTest is ReferralTestHarness {
         _createSecondaryPosition(user2, ENTRY_1, depositAmount);
         
         uint256 tokens = contest.balanceOf(user2, ENTRY_1);
-        uint256 liq = contest.secondaryLiquidityPerEntry(ENTRY_1);
-        uint256 supply = uint256(contest.netPosition(ENTRY_1));
         uint256 sellAmt = tokens / 2;
-        uint256 expectedRefund = (sellAmt * liq) / supply;
+        uint256 expectedRefund = (depositAmount * sellAmt) / tokens;
         uint256 balanceBefore = paymentToken.balanceOf(user2);
 
         vm.prank(oracle);
@@ -2503,7 +2540,7 @@ contract ContestControllerTest is ReferralTestHarness {
         contest.removeSecondaryPosition(ENTRY_1, sellAmt);
         
         uint256 refunded = paymentToken.balanceOf(user2) - balanceBefore;
-        assertApproxEqRel(refunded, expectedRefund, 0.01e18);
+        assertEq(refunded, expectedRefund);
     }
     
     // ============ Edge Cases ============

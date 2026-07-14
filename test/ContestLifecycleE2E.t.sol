@@ -175,7 +175,7 @@ contract ContestLifecycleE2E is ReferralTestHarness {
         contest.removePrimaryPosition(ENTRY_1);
 
         assertEq(paymentToken.balanceOf(u1), u1Pre);
-        assertApproxEqAbs(paymentToken.balanceOf(u3), u3Pre, 2e18);
+        assertEq(paymentToken.balanceOf(u3), u3Pre);
     }
 
     function test_E2E_CancelExpired_thenRefunds() public {
@@ -197,7 +197,7 @@ contract ContestLifecycleE2E is ReferralTestHarness {
         contest.removePrimaryPosition(ENTRY_1);
 
         assertEq(paymentToken.balanceOf(u1), u1Pre);
-        assertApproxEqAbs(paymentToken.balanceOf(u3), u3Pre, 2e18);
+        assertEq(paymentToken.balanceOf(u3), u3Pre);
     }
 
     function test_E2E_CloseContest_routesResidualToOracle() public {
@@ -205,6 +205,9 @@ contract ContestLifecycleE2E is ReferralTestHarness {
         uint256 oracleBefore = paymentToken.balanceOf(oracle);
 
         vm.warp(block.timestamp + EXPIRY_OFFSET + 1);
+        contest.cancelExpired();
+        assertEq(uint8(contest.state()), uint8(4));
+
         vm.prank(oracle);
         contest.closeContest();
 

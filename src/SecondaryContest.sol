@@ -44,33 +44,28 @@ library SecondaryContest {
     }
 
     function validateRemoveSecondaryPosition(
-        mapping(uint256 => address) storage entryOwner,
-        uint256 entryId,
         uint256 tokenAmount,
         uint256 balance,
         uint8 currentState
-    ) internal view {
+    ) internal pure {
         require(
             currentState == 0 || currentState == 4,
             "Cannot withdraw - competition started or settled"
         );
-        require(entryOwner[entryId] != address(0), "Entry does not exist");
         require(tokenAmount > 0, "Amount must be > 0");
         require(balance >= tokenAmount, "Insufficient balance");
     }
 
     function validateClaimSecondaryPayout(
-        mapping(uint256 => address) storage entryOwner,
         uint256 entryId,
         uint256 balance,
         uint8 currentState,
         bool secondaryMarketResolved,
         uint256 secondaryWinningEntry
-    ) internal view {
+    ) internal pure {
         require(currentState == 3, "Contest not settled");
         require(secondaryMarketResolved, "Market not resolved");
         require(entryId == secondaryWinningEntry, "Not winning entry");
-        require(entryOwner[entryId] != address(0), "Entry does not exist or was withdrawn");
         require(balance > 0, "No tokens");
     }
 

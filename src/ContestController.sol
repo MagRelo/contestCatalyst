@@ -74,8 +74,8 @@ contract ContestController is ERC1155, ReentrancyGuard {
     /// @notice Primary-sourced secondary TVL on this entry (no share backing; not used for OPEN/CANCELLED sell-backs)
     mapping(uint256 => uint256) public secondaryPrimarySubsidyPerEntry;
 
-    /// @notice Attributed invested principal per token holder per entry (used by frontend UI)
-    /// @dev Updated on secondary buys and reduced pro-rata on sells; not used for pricing.
+    /// @notice Attributed invested principal per token holder per entry (cancellation refunds + UI)
+    /// @dev Updated on secondary buys and reduced pro-rata on sells; CANCELLED sell-backs refund this principal.
     mapping(address => mapping(uint256 => uint256)) public secondaryDepositedPerEntry;
 
     uint256 public secondaryWinningEntry;
@@ -227,29 +227,35 @@ contract ContestController is ERC1155, ReentrancyGuard {
         _mint(msg.sender, entryId, buyerTokens, "");
     }
 
-    /// @notice Pro-rata sell-back of secondary tokens (OPEN or CANCELLED only)
+    /// @notice Sell-back of secondary tokens (OPEN or CANCELLED only).
+    /// @dev CANCELLED refunds the caller's tracked principal; OPEN uses pro-rata pool share.
     function removeSecondaryPosition(uint256 entryId, uint256 tokenAmount) external nonReentrant {
         uint256 userBal = balanceOf[msg.sender][entryId];
 
-        SecondaryContest.validateRemoveSecondaryPosition(
-            entryOwner, entryId, tokenAmount, userBal, uint8(state)
-        );
+        SecondaryContest.validateRemoveSecondaryPosition(tokenAmount, userBal, uint8(state));
 
         uint256 supply = uint256(netPosition[entryId]);
         require(supply > 0, "No supply");
 
         uint256 liquidity = secondaryLiquidityPerEntry[entryId];
-        uint256 cashOut = (tokenAmount * liquidity) / supply;
+
+        uint256 depositedOnEntry = secondaryDepositedPerEntry[msg.sender][entryId];
+        uint256 principalToForfeit = 0;
+        if (depositedOnEntry > 0) {
+            principalToForfeit = (depositedOnEntry * tokenAmount) / userBal;
+            secondaryDepositedPerEntry[msg.sender][entryId] = depositedOnEntry - principalToForfeit;
+        }
+
+        uint256 cashOut;
+        if (state == ContestState.CANCELLED) {
+            cashOut = principalToForfeit;
+        } else {
+            cashOut = (tokenAmount * liquidity) / supply;
+        }
 
         uint256 available = IERC20Balance(paymentToken).balanceOf(address(this));
         if (cashOut > available) {
             cashOut = available;
-        }
-
-        uint256 depositedOnEntry = secondaryDepositedPerEntry[msg.sender][entryId];
-        if (depositedOnEntry > 0) {
-            uint256 principalToForfeit = (depositedOnEntry * tokenAmount) / userBal;
-            secondaryDepositedPerEntry[msg.sender][entryId] = depositedOnEntry - principalToForfeit;
         }
 
         _burn(msg.sender, entryId, tokenAmount);
@@ -270,7 +276,6 @@ contract ContestController is ERC1155, ReentrancyGuard {
         uint256 balance = balanceOf[msg.sender][entryId];
 
         SecondaryContest.validateClaimSecondaryPayout(
-            entryOwner,
             entryId,
             balance,
             uint8(state),
@@ -438,6 +443,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
     }
 
     function closeContest() external onlyOracle nonReentrant {
+        require(state == ContestState.SETTLED || state == ContestState.CANCELLED, "Not terminal state");
         require(block.timestamp >= expiryTimestamp, "Expiry not reached");
 
         uint256 remaining = IERC20Balance(paymentToken).balanceOf(address(this));

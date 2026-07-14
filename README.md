@@ -41,12 +41,12 @@ CANCELLED ←───────┘
 - **LOCKED**: Secondary closed. Oracle may settle.
 - **SETTLED**: Results in; users claim primary/secondary payouts.
 - **CANCELLED**: Refunds via remove primary/secondary.
-- **CLOSED**: After `expiryTimestamp`, oracle may sweep residual balance.
+- **CLOSED**: After `expiryTimestamp`, from SETTLED or CANCELLED, oracle may sweep residual balance.
 
 **Operational trust / expiry notes:**
 
-- `expiryTimestamp` is the settlement deadline — the oracle must settle before expiry. After expiry, permissionless `cancelExpired()` is an intentional escape hatch (#4).
-- `closeContest` after expiry may sweep unclaimed SETTLED payouts; the oracle is trusted to wait for claims (#9).
+- `expiryTimestamp` is the settlement deadline — the oracle must settle **before** expiry. After expiry, permissionless `cancelExpired()` is an intentional escape hatch (including when the contest is LOCKED); settling after expiry races with cancellation.
+- `closeContest` requires `SETTLED` or `CANCELLED` and expiry. Remaining balance — including any unclaimed payouts or un-refunded deposits — may be swept to the oracle and is forfeit thereafter. The oracle should wait for claims when practical; lost keys do not brick closing.
 - Use a multisig for `oracle` in production (#20). `paymentToken` should be a standard non-fee, non-rebasing ERC20 (#12).
 - Contest operators must trust the `referralGraph` owner / per-group authorized oracles; a live `getReferrer` at settle is intentional (#8).
 
