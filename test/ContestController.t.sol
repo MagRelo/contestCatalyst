@@ -2592,6 +2592,126 @@ contract ContestControllerTest is ReferralTestHarness {
         assertEq(paymentToken.balanceOf(oracle), oracleBefore + referralFee);
     }
 
+    function test_settleContest_RejectsDuplicateWinners() public {
+        _createPrimaryEntry(user1, ENTRY_1);
+        _createPrimaryEntry(user2, ENTRY_2);
+        vm.prank(oracle);
+        contest.activateContest();
+        vm.prank(oracle);
+        contest.lockContest();
+
+        uint256[] memory winners = new uint256[](2);
+        winners[0] = ENTRY_1;
+        winners[1] = ENTRY_1;
+        uint256[] memory payouts = new uint256[](2);
+        payouts[0] = 6000;
+        payouts[1] = 4000;
+
+        vm.prank(oracle);
+        vm.expectRevert("Duplicate winning entry");
+        contest.settleContest(winners, payouts);
+    }
+
+    function test_settleContest_RejectsNonMemberWinner() public {
+        _createPrimaryEntry(user1, ENTRY_1);
+        vm.prank(oracle);
+        contest.activateContest();
+        vm.prank(oracle);
+        contest.lockContest();
+
+        uint256[] memory winners = new uint256[](1);
+        winners[0] = 99;
+        uint256[] memory payouts = new uint256[](1);
+        payouts[0] = 10_000;
+
+        vm.prank(oracle);
+        vm.expectRevert("Winner not an active entry");
+        contest.settleContest(winners, payouts);
+    }
+
+    function test_settleContest_MaliciousCalculatorFallsBackToOracle() public {
+        MaliciousOverpayCalculator evil = new MaliciousOverpayCalculator();
+        address contestAddress = factory.createContest(
+            address(paymentToken),
+            oracle,
+            PRIMARY_DEPOSIT,
+            REFERRAL_NETWORK_BPS,
+            block.timestamp + EXPIRY_OFFSET,
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
+            address(referralGraph),
+            address(evil),
+            REFERRAL_GROUP_ID
+        );
+        ContestController c = ContestController(contestAddress);
+
+        address referrer = address(0xBEEF);
+        _registerWinnerReferrer(user1, referrer);
+
+        _fundUserContest(user1, c, PRIMARY_DEPOSIT);
+        vm.prank(user1);
+        c.addPrimaryPosition(ENTRY_1, new bytes32[](0));
+        vm.prank(oracle);
+        c.activateContest();
+        _fundUserContest(user2, c, PURCHASE_INCREMENT);
+        vm.prank(user2);
+        c.addSecondaryPosition(ENTRY_1, PURCHASE_INCREMENT, new bytes32[](0));
+        vm.prank(oracle);
+        c.lockContest();
+
+        uint256 referralFee = _referralFeeAmount(c);
+        uint256 oracleBefore = paymentToken.balanceOf(oracle);
+        uint256 referrerBefore = paymentToken.balanceOf(referrer);
+
+        uint256[] memory winners = new uint256[](1);
+        winners[0] = ENTRY_1;
+        uint256[] memory payouts = new uint256[](1);
+        payouts[0] = 10_000;
+        _settleContest(c, winners, payouts);
+
+        assertEq(uint8(c.state()), uint8(ContestState.SETTLED));
+        assertEq(paymentToken.balanceOf(oracle), oracleBefore + referralFee);
+        assertEq(paymentToken.balanceOf(referrer), referrerBefore);
+    }
+
+    function test_settleContest_RevertingCalculatorFallsBackToOracle() public {
+        RevertingRewardCalculator evil = new RevertingRewardCalculator();
+        address contestAddress = factory.createContest(
+            address(paymentToken),
+            oracle,
+            PRIMARY_DEPOSIT,
+            REFERRAL_NETWORK_BPS,
+            block.timestamp + EXPIRY_OFFSET,
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
+            address(referralGraph),
+            address(evil),
+            REFERRAL_GROUP_ID
+        );
+        ContestController c = ContestController(contestAddress);
+
+        address referrer = address(0xCAFE);
+        _registerWinnerReferrer(user1, referrer);
+
+        _fundUserContest(user1, c, PRIMARY_DEPOSIT);
+        vm.prank(user1);
+        c.addPrimaryPosition(ENTRY_1, new bytes32[](0));
+        vm.prank(oracle);
+        c.activateContest();
+        vm.prank(oracle);
+        c.lockContest();
+
+        uint256 referralFee = _referralFeeAmount(c);
+        uint256 oracleBefore = paymentToken.balanceOf(oracle);
+
+        uint256[] memory winners = new uint256[](1);
+        winners[0] = ENTRY_1;
+        uint256[] memory payouts = new uint256[](1);
+        payouts[0] = 10_000;
+        _settleContest(c, winners, payouts);
+
+        assertEq(uint8(c.state()), uint8(ContestState.SETTLED));
+        assertEq(paymentToken.balanceOf(oracle), oracleBefore + referralFee);
+    }
+
     function test_addPrimaryPosition_MaxEntriesReached() public {
         // Fill almost to cap using a fresh zero-deposit contest to keep funding cheap
         address contestAddress = factory.createContest(
@@ -2617,6 +2737,20 @@ contract ContestControllerTest is ReferralTestHarness {
         vm.prank(user1);
         vm.expectRevert("Max entries reached");
         capped.addPrimaryPosition(cap + 1, new bytes32[](0));
+    }
+}
+
+/// @dev Returns oversized amounts so sum > referralFee and settle falls back to oracle
+contract MaliciousOverpayCalculator {
+    function calculateRewards(uint256, uint256 numRecipients) external pure returns (uint256[] memory amounts) {
+        amounts = new uint256[](numRecipients == 0 ? 1 : numRecipients);
+        amounts[0] = type(uint128).max;
+    }
+}
+
+contract RevertingRewardCalculator {
+    function calculateRewards(uint256, uint256) external pure returns (uint256[] memory) {
+        revert("calculator down");
     }
 }
 
