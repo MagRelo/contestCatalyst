@@ -102,6 +102,9 @@ contract SecondaryContestPricingTest is ReferralTestHarness {
         paymentToken.approve(address(contest), PRIMARY_DEPOSIT);
         contest.addPrimaryPosition(3, new bytes32[](0));
         vm.stopPrank();
+
+        vm.prank(oracle);
+        contest.activateContest();
     }
     
     /**

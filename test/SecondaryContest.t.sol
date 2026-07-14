@@ -392,11 +392,11 @@ contract SecondaryContestTest is Test {
 
     // ============ validateAddSecondaryPosition Tests ============
 
-    function test_validateAddSecondaryPosition_Valid_OPEN() public {
+    function test_validateAddSecondaryPosition_Invalid_OPEN() public {
         _setState(ContestState.OPEN);
         _createEntry(ENTRY_1, entryOwner1);
         
-        // Should not revert
+        vm.expectRevert("Secondary positions not available");
         testStorage.validateAddSecondaryPosition(ENTRY_1, AMOUNT_1, uint8(ContestState.OPEN));
     }
 
@@ -441,28 +441,28 @@ contract SecondaryContestTest is Test {
     }
 
     function test_validateAddSecondaryPosition_Invalid_EntryDoesNotExist() public {
-        _setState(ContestState.OPEN);
+        _setState(ContestState.ACTIVE);
         // Entry not created
         
         vm.expectRevert("Entry does not exist or withdrawn");
-        testStorage.validateAddSecondaryPosition(ENTRY_3, AMOUNT_1, uint8(ContestState.OPEN));
+        testStorage.validateAddSecondaryPosition(ENTRY_3, AMOUNT_1, uint8(ContestState.ACTIVE));
     }
 
     function test_validateAddSecondaryPosition_Invalid_EntryWithdrawn() public {
-        _setState(ContestState.OPEN);
+        _setState(ContestState.ACTIVE);
         _createEntry(ENTRY_1, entryOwner1);
         _removeEntry(ENTRY_1);
         
         vm.expectRevert("Entry does not exist or withdrawn");
-        testStorage.validateAddSecondaryPosition(ENTRY_1, AMOUNT_1, uint8(ContestState.OPEN));
+        testStorage.validateAddSecondaryPosition(ENTRY_1, AMOUNT_1, uint8(ContestState.ACTIVE));
     }
 
     function test_validateAddSecondaryPosition_Invalid_ZeroAmount() public {
-        _setState(ContestState.OPEN);
+        _setState(ContestState.ACTIVE);
         _createEntry(ENTRY_1, entryOwner1);
         
         vm.expectRevert("Amount must be > 0");
-        testStorage.validateAddSecondaryPosition(ENTRY_1, 0, uint8(ContestState.OPEN));
+        testStorage.validateAddSecondaryPosition(ENTRY_1, 0, uint8(ContestState.ACTIVE));
     }
 
     function testFuzz_validateAddSecondaryPosition_ValidStates(
@@ -474,10 +474,7 @@ contract SecondaryContestTest is Test {
         
         _createEntry(entryId, entryOwner1);
         
-        // Test OPEN state
-        testStorage.validateAddSecondaryPosition(entryId, amount, uint8(ContestState.OPEN));
-        
-        // Test ACTIVE state
+        // ACTIVE is the only valid buy state
         testStorage.validateAddSecondaryPosition(entryId, amount, uint8(ContestState.ACTIVE));
     }
 
@@ -489,6 +486,9 @@ contract SecondaryContestTest is Test {
         entryId = bound(entryId, 1, 1000);
         
         _createEntry(entryId, entryOwner1);
+
+        vm.expectRevert("Secondary positions not available");
+        testStorage.validateAddSecondaryPosition(entryId, amount, uint8(ContestState.OPEN));
         
         // Test invalid states
         vm.expectRevert("Secondary positions not available");

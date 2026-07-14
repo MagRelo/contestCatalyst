@@ -36,7 +36,7 @@ library SecondaryContest {
         uint256 amount,
         uint8 currentState
     ) internal view {
-        require(currentState == 0 || currentState == 1, "Secondary positions not available");
+        require(currentState == 1, "Secondary positions not available");
         require(entryOwner[entryId] != address(0), "Entry does not exist or withdrawn");
         require(amount > 0, "Amount must be > 0");
     }

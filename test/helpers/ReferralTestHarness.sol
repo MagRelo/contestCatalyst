@@ -78,6 +78,10 @@ abstract contract ReferralTestHarness is Test {
     function _settleContest(ContestController c, uint256[] memory winningEntries, uint256[] memory payoutBps)
         internal
     {
+        if (c.state() == ContestController.ContestState.ACTIVE) {
+            vm.prank(c.oracle());
+            c.lockContest();
+        }
         vm.prank(c.oracle());
         c.settleContest(winningEntries, payoutBps);
     }
@@ -88,9 +92,21 @@ abstract contract ReferralTestHarness is Test {
         uint256[] memory payoutBps,
         bytes memory reason
     ) internal {
+        if (c.state() == ContestController.ContestState.ACTIVE) {
+            vm.prank(c.oracle());
+            c.lockContest();
+        }
         vm.prank(c.oracle());
         vm.expectRevert(reason);
         c.settleContest(winningEntries, payoutBps);
+    }
+
+    /// @dev Activate if still OPEN so secondary buys succeed under ACTIVE-only gating.
+    function _ensureActiveForSecondary(ContestController c) internal {
+        if (c.state() == ContestController.ContestState.OPEN) {
+            vm.prank(c.oracle());
+            c.activateContest();
+        }
     }
 
     function _netBps(ContestController c) internal view returns (uint256) {

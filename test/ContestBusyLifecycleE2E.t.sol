@@ -63,6 +63,7 @@ contract ContestBusyLifecycleE2E is ReferralTestHarness {
     }
 
     function _secondary(address user, uint256 entryId, uint256 amount) internal {
+        _ensureActiveForSecondary(contest);
         _approve(user, amount);
         vm.prank(user);
         contest.addSecondaryPosition(entryId, amount, new bytes32[](0));
@@ -120,8 +121,6 @@ contract ContestBusyLifecycleE2E is ReferralTestHarness {
         uint256 threeSubsidy = 3 * ((PRIMARY_DEPOSIT * PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS) / 10_000);
         assertEq(contest.getSecondarySideBalance(), totalSecondaryBought + threeSubsidy);
 
-        vm.prank(oracle);
-        contest.activateContest();
         vm.prank(oracle);
         contest.lockContest();
 

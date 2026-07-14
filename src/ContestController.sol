@@ -42,6 +42,8 @@ contract ContestController is ERC1155, ReentrancyGuard {
     uint256 public constant BPS_DENOMINATOR = 10000;
     uint256 public constant PRICE_PRECISION = 1e6;
     uint256 public constant MAX_REFERRAL_PAYOUT_LEVELS = 10;
+    /// @notice Hard cap on concurrently active primary entries (settlement/close iterate `entries[]`)
+    uint256 public constant MAX_ENTRIES = 500;
 
     enum ContestState {
         OPEN,
@@ -149,6 +151,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
         PrimaryContest.validatePrimaryMerkleProof(primaryMerkleRoot, msg.sender, merkleProof);
         PrimaryContest.validateAddPrimaryPosition(entryOwner, entryId, expiryTimestamp, uint8(state));
         require(entryIndexPlusOne[entryId] == 0, "Entry already active");
+        require(entries.length < MAX_ENTRIES, "Max entries reached");
 
         PrimaryContest.processAddPrimaryPosition(entries, entryOwner, entryId, msg.sender, primaryDepositAmount);
         entryIndexPlusOne[entryId] = entries.length;
@@ -289,7 +292,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
         onlyOracle
         nonReentrant
     {
-        require(state == ContestState.ACTIVE || state == ContestState.LOCKED, "Contest not active or locked");
+        require(state == ContestState.LOCKED, "Contest not locked");
         require(winningEntries.length > 0, "Must have at least one winner");
         require(winningEntries.length == payoutBps.length, "Array length mismatch");
         require(winningEntries.length <= entries.length, "Too many winners");

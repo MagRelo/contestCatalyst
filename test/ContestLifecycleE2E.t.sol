@@ -57,6 +57,7 @@ contract ContestLifecycleE2E is ReferralTestHarness {
     }
 
     function _secondary(ContestController c, address u, uint256 eid, uint256 amt) internal {
+        _ensureActiveForSecondary(c);
         _fund(u, amt, address(c));
         vm.prank(u);
         c.addSecondaryPosition(eid, amt, new bytes32[](0));
@@ -77,8 +78,6 @@ contract ContestLifecycleE2E is ReferralTestHarness {
         _secondary(contest, u3, ENTRY_1, PURCHASE_INCREMENT * 2);
         _secondary(contest, u4, ENTRY_2, PURCHASE_INCREMENT * 3);
 
-        vm.prank(oracle);
-        contest.activateContest();
         vm.prank(oracle);
         contest.lockContest();
 
@@ -220,8 +219,6 @@ contract ContestLifecycleE2E is ReferralTestHarness {
         _primary(contest, u2, ENTRY_2);
         _secondary(contest, u3, ENTRY_2, PURCHASE_INCREMENT);
 
-        vm.prank(oracle);
-        contest.activateContest();
         vm.prank(oracle);
         contest.lockContest();
 

@@ -71,7 +71,7 @@ contract BreakEvenAnalysis is ReferralTestHarness {
         paymentToken.mint(bettor1, 1000000e18); // $1M for testing
         paymentToken.mint(bettor2, 1000000e18); // $1M for testing
         
-        // Create 5 primary entries, each also betting $20 on themselves in secondary
+        // Create 5 primary entries first, then activate for secondary market
         for (uint256 i = 1; i <= 5; i++) {
             address user = address(uint160(0x10 + i));
             paymentToken.mint(user, 1000e18);
@@ -79,6 +79,15 @@ contract BreakEvenAnalysis is ReferralTestHarness {
             vm.startPrank(user);
             paymentToken.approve(address(contest), PRIMARY_DEPOSIT + 20e18);
             contest.addPrimaryPosition(i, new bytes32[](0));
+            vm.stopPrank();
+        }
+
+        vm.prank(oracle);
+        contest.activateContest();
+
+        for (uint256 i = 1; i <= 5; i++) {
+            address user = address(uint160(0x10 + i));
+            vm.startPrank(user);
             // Each primary entry bets $20 on themselves in secondary
             contest.addSecondaryPosition(i, 20e18, new bytes32[](0));
             vm.stopPrank();
