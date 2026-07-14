@@ -143,7 +143,13 @@ contract ContestControllerTest is ReferralTestHarness {
         vm.prank(user);
         contest.addPrimaryPosition(entryId, new bytes32[](0));
     }
-    
+
+    function _createPrimaryEntryOn(ContestController ctr, address user, uint256 entryId) internal {
+        _fundUserContest(user, ctr, PRIMARY_DEPOSIT);
+        vm.prank(user);
+        ctr.addPrimaryPosition(entryId, new bytes32[](0));
+    }
+
     /**
      * @notice Create secondary position
      */
@@ -151,6 +157,14 @@ contract ContestControllerTest is ReferralTestHarness {
         _fundUser(user, amount);
         vm.prank(user);
         contest.addSecondaryPosition(entryId, amount, new bytes32[](0));
+    }
+
+    function _createSecondaryPositionOn(ContestController ctr, address user, uint256 entryId, uint256 amount)
+        internal
+    {
+        _fundUserContest(user, ctr, amount);
+        vm.prank(user);
+        ctr.addSecondaryPosition(entryId, amount, new bytes32[](0));
     }
     
     /**
@@ -1238,6 +1252,92 @@ contract ContestControllerTest is ReferralTestHarness {
         vm.prank(user4);
         vm.expectRevert("Not winning entry");
         contest.claimSecondaryPayout(ENTRY_2);
+    }
+
+    /// @dev Audit finding #1: last secondary claimant must not sweep the primary prize pool.
+    function test_claimSecondaryPayout_doesNotSweepPrimaryPrizePool() public {
+        _createPrimaryEntry(user1, ENTRY_1);
+        _createPrimaryEntry(user2, ENTRY_2);
+        // Attacker is sole secondary holder on the eventual winning entry
+        _createSecondaryPosition(user3, ENTRY_1, PURCHASE_INCREMENT);
+
+        vm.prank(oracle);
+        contest.activateContest();
+        vm.prank(oracle);
+        contest.lockContest();
+
+        uint256[] memory winners = new uint256[](1);
+        winners[0] = ENTRY_1;
+        uint256[] memory payouts = new uint256[](1);
+        payouts[0] = 10000;
+        _settleContest(contest, winners, payouts);
+
+        uint256 primaryPayout = contest.primaryPrizePoolPayouts(ENTRY_1);
+        assertGt(primaryPayout, 0);
+
+        uint256 secondaryLiq = contest.secondaryLiquidityPerEntry(ENTRY_1);
+        uint256 attackerBalBefore = paymentToken.balanceOf(user3);
+
+        vm.prank(user3);
+        contest.claimSecondaryPayout(ENTRY_1);
+
+        uint256 attackerReceived = paymentToken.balanceOf(user3) - attackerBalBefore;
+        // Attacker gets at most their secondary share, not the primary pool
+        assertLe(attackerReceived, secondaryLiq);
+        assertEq(contest.balanceOf(user3, ENTRY_1), 0);
+
+        // Primary winner can still claim — proves pool was not drained
+        uint256 winnerBalBefore = paymentToken.balanceOf(user1);
+        vm.prank(user1);
+        contest.claimPrimaryPayout(ENTRY_1);
+        assertEq(paymentToken.balanceOf(user1) - winnerBalBefore, primaryPayout);
+    }
+
+    /// @dev Pull and push secondary claim paths pay the same for an identical holder (#13).
+    function test_claimSecondaryPayout_matchesPushSecondaryPayouts() public {
+        uint256[] memory winners = new uint256[](1);
+        winners[0] = ENTRY_1;
+        uint256[] memory payouts = new uint256[](1);
+        payouts[0] = 10000;
+
+        // Contest A: user3 pulls
+        _createPrimaryEntry(user1, ENTRY_1);
+        _createPrimaryEntry(user2, ENTRY_2);
+        _createSecondaryPosition(user3, ENTRY_1, PURCHASE_INCREMENT * 4);
+        _createSecondaryPosition(user4, ENTRY_1, PURCHASE_INCREMENT * 6);
+
+        vm.prank(oracle);
+        contest.activateContest();
+        vm.prank(oracle);
+        contest.lockContest();
+        _settleContest(contest, winners, payouts);
+
+        uint256 expected3 = (contest.balanceOf(user3, ENTRY_1) * contest.secondaryLiquidityPerEntry(ENTRY_1))
+            / uint256(contest.netPosition(ENTRY_1));
+        uint256 before3 = paymentToken.balanceOf(user3);
+        vm.prank(user3);
+        contest.claimSecondaryPayout(ENTRY_1);
+        assertEq(paymentToken.balanceOf(user3) - before3, expected3);
+
+        // Contest B: identical setup; oracle pushes to user3
+        ContestController pushContest = _deployContest(oracle, EXPIRY_OFFSET);
+        _createPrimaryEntryOn(pushContest, user1, ENTRY_1);
+        _createPrimaryEntryOn(pushContest, user2, ENTRY_2);
+        _createSecondaryPositionOn(pushContest, user3, ENTRY_1, PURCHASE_INCREMENT * 4);
+        _createSecondaryPositionOn(pushContest, user4, ENTRY_1, PURCHASE_INCREMENT * 6);
+
+        vm.prank(oracle);
+        pushContest.activateContest();
+        vm.prank(oracle);
+        pushContest.lockContest();
+        _settleContest(pushContest, winners, payouts);
+
+        uint256 beforePush3 = paymentToken.balanceOf(user3);
+        address[] memory participants = new address[](1);
+        participants[0] = user3;
+        vm.prank(oracle);
+        pushContest.pushSecondaryPayouts(participants, ENTRY_1);
+        assertEq(paymentToken.balanceOf(user3) - beforePush3, expected3);
     }
     
     // ============ Oracle Functions Tests ============

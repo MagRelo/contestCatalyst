@@ -267,41 +267,8 @@ contract ContestController is ERC1155, ReentrancyGuard {
             secondaryWinningEntry
         );
 
-        uint256 totalSupplyBefore = uint256(netPosition[entryId]);
-        require(totalSupplyBefore > 0, "No supply");
-
-        uint256 entryLiquidity = secondaryLiquidityPerEntry[entryId];
-        uint256 payout = entryLiquidity > 0 ? (balance * entryLiquidity) / totalSupplyBefore : 0;
-
-        uint256 available = IERC20Balance(paymentToken).balanceOf(address(this));
-        if (payout > available) {
-            payout = available;
-        }
-
-        _burn(msg.sender, entryId, balance);
-        netPosition[entryId] -= int256(balance);
-
-        secondaryDepositedPerEntry[msg.sender][entryId] = 0;
-
-        if (payout > 0) {
-            if (secondaryLiquidityPerEntry[entryId] >= payout) {
-                secondaryLiquidityPerEntry[entryId] -= payout;
-            } else {
-                secondaryLiquidityPerEntry[entryId] = 0;
-            }
-            SafeTransferLib.safeTransfer(ERC20(paymentToken), msg.sender, payout);
-            emit SecondaryPayoutClaimed(msg.sender, entryId, payout);
-        } else {
-            emit SecondaryPayoutClaimed(msg.sender, entryId, 0);
-        }
-
-        if (uint256(netPosition[entryId]) == 0) {
-            uint256 remaining = IERC20Balance(paymentToken).balanceOf(address(this));
-            if (remaining > 0) {
-                secondaryLiquidityPerEntry[entryId] = 0;
-                SafeTransferLib.safeTransfer(ERC20(paymentToken), msg.sender, remaining);
-            }
-        }
+        require(uint256(netPosition[entryId]) > 0, "No supply");
+        _paySecondaryClaim(msg.sender, entryId);
     }
 
     function activateContest() external onlyOracle {
@@ -504,34 +471,44 @@ contract ContestController is ERC1155, ReentrancyGuard {
         require(state == ContestState.SETTLED, "Contest not settled");
         require(secondaryMarketResolved, "Market not resolved");
         require(entryId == secondaryWinningEntry, "Not winning entry");
-
         require(uint256(netPosition[entryId]) > 0, "No supply");
 
         for (uint256 i = 0; i < participantAddresses.length; i++) {
-            address participant = participantAddresses[i];
-            uint256 bal = balanceOf[participant][entryId];
-
-            if (bal > 0) {
-                uint256 supplyBefore = uint256(netPosition[entryId]);
-                uint256 liqNow = secondaryLiquidityPerEntry[entryId];
-                uint256 payout = (supplyBefore > 0 && liqNow > 0) ? (bal * liqNow) / supplyBefore : 0;
-
-                _burn(participant, entryId, bal);
-                netPosition[entryId] -= int256(bal);
-
-                secondaryDepositedPerEntry[participant][entryId] = 0;
-
-                if (payout > 0) {
-                    if (secondaryLiquidityPerEntry[entryId] >= payout) {
-                        secondaryLiquidityPerEntry[entryId] -= payout;
-                    } else {
-                        secondaryLiquidityPerEntry[entryId] = 0;
-                    }
-
-                    SafeTransferLib.safeTransfer(ERC20(paymentToken), participant, payout);
-                    emit SecondaryPayoutClaimed(participant, entryId, payout);
-                }
+            if (balanceOf[participantAddresses[i]][entryId] > 0) {
+                _paySecondaryClaim(participantAddresses[i], entryId);
             }
+        }
+    }
+
+    /// @dev Shared pro-rata secondary claim used by pull and push paths. Pays only this entry's
+    ///      tracked liquidity share — never the contract's full ERC20 balance (dust stays for closeContest).
+    function _paySecondaryClaim(address participant, uint256 entryId) internal {
+        uint256 balance = balanceOf[participant][entryId];
+        uint256 totalSupplyBefore = uint256(netPosition[entryId]);
+        require(totalSupplyBefore > 0, "No supply");
+
+        uint256 entryLiquidity = secondaryLiquidityPerEntry[entryId];
+        uint256 payout = entryLiquidity > 0 ? (balance * entryLiquidity) / totalSupplyBefore : 0;
+
+        uint256 available = IERC20Balance(paymentToken).balanceOf(address(this));
+        if (payout > available) {
+            payout = available;
+        }
+
+        _burn(participant, entryId, balance);
+        netPosition[entryId] -= int256(balance);
+        secondaryDepositedPerEntry[participant][entryId] = 0;
+
+        if (payout > 0) {
+            if (secondaryLiquidityPerEntry[entryId] >= payout) {
+                secondaryLiquidityPerEntry[entryId] -= payout;
+            } else {
+                secondaryLiquidityPerEntry[entryId] = 0;
+            }
+            SafeTransferLib.safeTransfer(ERC20(paymentToken), participant, payout);
+            emit SecondaryPayoutClaimed(participant, entryId, payout);
+        } else {
+            emit SecondaryPayoutClaimed(participant, entryId, 0);
         }
     }
 

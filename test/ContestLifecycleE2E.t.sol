@@ -7,8 +7,8 @@ import "solmate/tokens/ERC20.sol";
 
 /**
  * @notice End-to-end lifecycle checks aligned with README state machine and fund-routing assumptions.
- * @dev Rounding slack: pro-rata integer division can leave wei-level dust in the contest until the last
- *      `claimSecondaryPayout` sweep; keep assertions within `ROUNDING_SLACK`.
+ * @dev Rounding slack: pro-rata integer division can leave wei-level dust in the contest for
+ *      `closeContest`; keep assertions within `ROUNDING_SLACK`.
  */
 contract ContestLifecycleE2E is ReferralTestHarness {
     uint256 public constant PRIMARY_DEPOSIT = 25e18;
