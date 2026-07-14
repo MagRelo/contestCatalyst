@@ -201,7 +201,9 @@ contract ContestController is ERC1155, ReentrancyGuard {
         nonReentrant
     {
         SecondaryContest.validateSecondaryMerkleProof(secondaryMerkleRoot, msg.sender, merkleProof);
-        SecondaryContest.validateAddSecondaryPosition(entryOwner, entryId, amount, uint8(state));
+        SecondaryContest.validateAddSecondaryPosition(
+            entryOwner, entryId, amount, expiryTimestamp, uint8(state)
+        );
 
         int256 netPos = netPosition[entryId];
         uint256 shares0 = netPos > 0 ? uint256(netPos) : 0;
@@ -214,9 +216,9 @@ contract ContestController is ERC1155, ReentrancyGuard {
         SecondaryContest.processAddSecondaryPosition(netPosition, entryId, msg.sender, amount, buyerTokens);
 
         secondaryDepositedPerEntry[msg.sender][entryId] += amount;
-        _mint(msg.sender, entryId, buyerTokens, "");
 
         SafeTransferLib.safeTransferFrom(ERC20(paymentToken), msg.sender, address(this), amount);
+        _mint(msg.sender, entryId, buyerTokens, "");
     }
 
     /// @notice Pro-rata sell-back of secondary tokens (OPEN or CANCELLED only)
@@ -477,7 +479,9 @@ contract ContestController is ERC1155, ReentrancyGuard {
         for (uint256 i = 0; i < entryIds.length; i++) {
             uint256 entryId = entryIds[i];
             address owner = entryOwner[entryId];
-            require(owner != address(0), "Entry withdrawn or invalid");
+            if (owner == address(0)) {
+                continue;
+            }
 
             uint256 payout = primaryPrizePoolPayouts[entryId];
             if (payout == 0) {
@@ -508,10 +512,19 @@ contract ContestController is ERC1155, ReentrancyGuard {
         require(uint256(netPosition[entryId]) > 0, "No supply");
 
         for (uint256 i = 0; i < participantAddresses.length; i++) {
-            if (balanceOf[participantAddresses[i]][entryId] > 0) {
-                _paySecondaryClaim(participantAddresses[i], entryId);
+            address participant = participantAddresses[i];
+            if (balanceOf[participant][entryId] == 0) {
+                continue;
             }
+            // Isolate per-recipient failures (e.g. blocklisted token recipient)
+            try this.paySecondaryClaimExternal(participant, entryId) {} catch {}
         }
+    }
+
+    /// @notice Self-call target so a single push recipient failure does not revert the batch
+    function paySecondaryClaimExternal(address participant, uint256 entryId) external {
+        require(msg.sender == address(this), "Only self");
+        _paySecondaryClaim(participant, entryId);
     }
 
     /// @dev Shared pro-rata secondary claim used by pull and push paths. Pays only this entry's
@@ -548,6 +561,23 @@ contract ContestController is ERC1155, ReentrancyGuard {
 
     function uri(uint256) public pure override returns (string memory) {
         return "";
+    }
+
+    /// @dev Secondary ERC1155 shares are accounting-only; only contest mint/burn paths may change balances.
+    function setApprovalForAll(address, bool) public pure override {
+        revert("Transfers disabled");
+    }
+
+    function safeTransferFrom(address, address, uint256, uint256, bytes calldata) public pure override {
+        revert("Transfers disabled");
+    }
+
+    function safeBatchTransferFrom(address, address, uint256[] calldata, uint256[] calldata, bytes calldata)
+        public
+        pure
+        override
+    {
+        revert("Transfers disabled");
     }
 
     function getEntriesCount() external view returns (uint256) {

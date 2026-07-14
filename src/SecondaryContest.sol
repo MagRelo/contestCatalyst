@@ -34,9 +34,11 @@ library SecondaryContest {
         mapping(uint256 => address) storage entryOwner,
         uint256 entryId,
         uint256 amount,
+        uint256 expiryTimestamp,
         uint8 currentState
     ) internal view {
         require(currentState == 1, "Secondary positions not available");
+        require(block.timestamp < expiryTimestamp, "Contest expired");
         require(entryOwner[entryId] != address(0), "Entry does not exist or withdrawn");
         require(amount > 0, "Amount must be > 0");
     }

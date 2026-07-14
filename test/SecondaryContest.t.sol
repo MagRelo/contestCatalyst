@@ -15,6 +15,7 @@ contract TestStorage {
     uint8 public currentState;
     bool public secondaryMarketResolved;
     uint256 public secondaryWinningEntry;
+    uint256 public expiryTimestamp = type(uint256).max;
 
     // Setter functions for test setup
     function setEntryOwner(uint256 entryId, address owner) external {
@@ -37,6 +38,10 @@ contract TestStorage {
         currentState = state;
     }
 
+    function setExpiryTimestamp(uint256 expiry) external {
+        expiryTimestamp = expiry;
+    }
+
     // Expose library functions for testing
     function validateSecondaryMerkleProof(
         bytes32 merkleRoot,
@@ -51,7 +56,7 @@ contract TestStorage {
         uint256 amount,
         uint8 state
     ) external view {
-        SecondaryContest.validateAddSecondaryPosition(entryOwner, entryId, amount, state);
+        SecondaryContest.validateAddSecondaryPosition(entryOwner, entryId, amount, expiryTimestamp, state);
     }
 
     function validateRemoveSecondaryPosition(
@@ -463,6 +468,15 @@ contract SecondaryContestTest is Test {
         
         vm.expectRevert("Amount must be > 0");
         testStorage.validateAddSecondaryPosition(ENTRY_1, 0, uint8(ContestState.ACTIVE));
+    }
+
+    function test_validateAddSecondaryPosition_Invalid_Expired() public {
+        _setState(ContestState.ACTIVE);
+        _createEntry(ENTRY_1, entryOwner1);
+        testStorage.setExpiryTimestamp(block.timestamp);
+        
+        vm.expectRevert("Contest expired");
+        testStorage.validateAddSecondaryPosition(ENTRY_1, AMOUNT_1, uint8(ContestState.ACTIVE));
     }
 
     function testFuzz_validateAddSecondaryPosition_ValidStates(

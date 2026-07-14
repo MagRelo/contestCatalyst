@@ -1353,6 +1353,39 @@ contract ContestControllerTest is ReferralTestHarness {
         pushContest.pushSecondaryPayouts(participants, ENTRY_1);
         assertEq(paymentToken.balanceOf(user3) - beforePush3, expected3);
     }
+
+    function test_erc1155TransfersDisabled() public {
+        _createPrimaryEntry(user1, ENTRY_1);
+        _createSecondaryPosition(user2, ENTRY_1, PURCHASE_INCREMENT);
+
+        vm.prank(user2);
+        vm.expectRevert("Transfers disabled");
+        contest.setApprovalForAll(user3, true);
+
+        vm.prank(user2);
+        vm.expectRevert("Transfers disabled");
+        contest.safeTransferFrom(user2, user3, ENTRY_1, 1, "");
+
+        uint256[] memory ids = new uint256[](1);
+        ids[0] = ENTRY_1;
+        uint256[] memory amts = new uint256[](1);
+        amts[0] = 1;
+        vm.prank(user2);
+        vm.expectRevert("Transfers disabled");
+        contest.safeBatchTransferFrom(user2, user3, ids, amts, "");
+    }
+
+    function test_addSecondaryPosition_RevertsWhenExpired() public {
+        _createPrimaryEntry(user1, ENTRY_1);
+        vm.prank(oracle);
+        contest.activateContest();
+
+        vm.warp(contest.expiryTimestamp());
+        _fundUser(user2, PURCHASE_INCREMENT);
+        vm.prank(user2);
+        vm.expectRevert("Contest expired");
+        contest.addSecondaryPosition(ENTRY_1, PURCHASE_INCREMENT, new bytes32[](0));
+    }
     
     // ============ Oracle Functions Tests ============
     
@@ -1890,13 +1923,19 @@ contract ContestControllerTest is ReferralTestHarness {
         uint256[] memory payouts = new uint256[](1);
         payouts[0] = 10000;
         _settleContest(contest, winners, payouts);
+
+        uint256 user2Before = paymentToken.balanceOf(user2);
+        uint256 expected = contest.primaryPrizePoolPayouts(ENTRY_2);
         
-        uint256[] memory entryIds = new uint256[](1);
-        entryIds[0] = ENTRY_1;
+        uint256[] memory entryIds = new uint256[](2);
+        entryIds[0] = ENTRY_1; // withdrawn — soft-skipped
+        entryIds[1] = ENTRY_2;
         
         vm.prank(oracle);
-        vm.expectRevert("Entry withdrawn or invalid");
         contest.pushPrimaryPayouts(entryIds);
+
+        assertEq(paymentToken.balanceOf(user2), user2Before + expected);
+        assertEq(contest.primaryPrizePoolPayouts(ENTRY_2), 0);
     }
     
     // ============ pushSecondaryPayouts Tests ============
