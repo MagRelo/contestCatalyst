@@ -36,18 +36,21 @@ OPEN → ACTIVE → LOCKED → SETTLED → CLOSED
 CANCELLED ←───────┘
 ```
 
-- **OPEN**: Primary participants join, secondary participants add positions, withdrawals allowed
-- **ACTIVE**: Primary positions locked, secondary still open, no withdrawals
-- **LOCKED**: Secondary positions closed
-- **SETTLED**: Results in, users claim payouts
-- **CANCELLED**: Contest cancelled, refunds available
-- **CLOSED**: Force distributed
+- **OPEN**: Primary participants join/withdraw. Secondary market is **closed**.
+- **ACTIVE**: Primary locked. Secondary buys open (non-transferable ERC1155 accounting shares).
+- **LOCKED**: Secondary closed. Oracle may settle.
+- **SETTLED**: Results in; users claim primary/secondary payouts.
+- **CANCELLED**: Refunds via remove primary/secondary.
+- **CLOSED**: After `expiryTimestamp`, oracle may sweep residual balance.
 
-**Note on Cancellation & Expiry:**
+**Operational trust / expiry notes:**
 
-- Anyone can call `cancelExpired()` if the contest has passed its expiry timestamp and is not `SETTLED` or `CLOSED`
-- **In `CANCELLED` state**: Primary and secondary participants can withdraw their positions for full refunds. No new positions can be added, and no payouts can be claimed.
-- **Referral network fee**: At settlement, `referralNetworkBps` (e.g. 5%) is deducted once from gross distributable TVL (primary pool + secondary TVL). The contest resolves the winning entry owner’s referrer chain via `ReferralGraph` + `RewardCalculator` and transfers the fee directly, or sends it to the oracle if no payable referrer exists. `claim*` and `push*` pay full net amounts with no further fee skimming.
+- `expiryTimestamp` is the settlement deadline — the oracle must settle before expiry. After expiry, permissionless `cancelExpired()` is an intentional escape hatch (#4).
+- `closeContest` after expiry may sweep unclaimed SETTLED payouts; the oracle is trusted to wait for claims (#9).
+- Use a multisig for `oracle` in production (#20). `paymentToken` should be a standard non-fee, non-rebasing ERC20 (#12).
+- Contest operators must trust the `referralGraph` owner / per-group authorized oracles; a live `getReferrer` at settle is intentional (#8).
+
+**Referral network fee:** At settlement, `referralNetworkBps` (≤10%) is deducted once from gross TVL. Distribution uses `ReferralGraph` + `RewardCalculator` via a try/catch path that falls back to `oracle` on failure. `claim*` / `push*` pay full net amounts.
 
 ## Quick Usage Guide
 
@@ -67,16 +70,13 @@ contest.claimPrimaryPayout(entryId);
 ### Secondary Participants
 
 ```solidity
-// Add position on an entry (variable amount, gets ERC1155 tokens)
+// Add position on an entry while ACTIVE (variable amount, non-transferable ERC1155)
 contest.addSecondaryPosition(entryId, amount, merkleProof);
 
-// Remove position during OPEN phase only (full refund)
+// Sell-back only while OPEN (pre-activate) or CANCELLED
 contest.removeSecondaryPosition(entryId, tokenAmount);
 
-// Claim payout after settlement (winner-take-all on the oracle’s first winning primary entry):
-// all secondary payment-token backing across entries is merged to that entry at settlement, then
-// redeemed pro-rata by ERC1155 holders of that entry. If no supply exists on
-// that entry, merged secondary TVL is added to primary payout allocations instead.
+// Claim payout after settlement (winning entry's ERC1155 holders, pro-rata)
 contest.claimSecondaryPayout(entryId);
 ```
 

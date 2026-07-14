@@ -43,13 +43,16 @@ Rationale: referralTree is shared attribution + split math. The contest owns cus
 
 1. Compute `referralFee` from gross primary + secondary TVL.
 2. Shrink primary/secondary pools by `netBps = 10000 - referralNetworkBps`.
-3. If `referralFee > 0`:
-   - `payoutAnchor = referralGraph.getReferrer(winner, referralGroupId)`
-   - If no payable anchor (`address(0)` or `REFERRAL_ROOT`): transfer fee to `oracle`, emit `ReferralNetworkFeeToOracle`
-   - Else `chain = getPayoutChain(payoutAnchor, …)` (skiplist-aware). If empty → fee to oracle.
-   - Else `amounts = rewardCalculator.calculateRewards(referralFee, chain.length)`, transfer each amount from contest, emit `ReferralNetworkFeeDistributed(winner, payoutAnchor, fee, chain, amounts)`.
+3. If `referralFee > 0`, `distributeReferralFee` runs via a self-call try/catch:
+   - On any failure (reverting graph/calculator, reward length mismatch, rewards summing above fee, or transfer revert), the full fee is sent to `oracle` and settlement continues.
+   - Success path: `payoutAnchor = getReferrer(winner)`; empty/`REFERRAL_ROOT` → fee to oracle; else `getPayoutChain` + `calculateRewards` + transfers.
 
 **Important:** Chain seed is the winner’s **immediate referrer**, not the winner. The winner already receives primary/secondary winnings and must not double-dip on the referral fee.
+
+## Trust assumptions
+
+- Contest operators must trust `ReferralGraph.owner` and the group’s authorized oracles. An authorized oracle can register an unregistered winner under an attacker-controlled referrer before settlement redirects up to `referralNetworkBps` of TVL. Participants should register referrers before settle, and operators should use a trustworthy graph/oracle set. Live `getReferrer` at settle (no lock-time snapshot) is intentional.
+- Prefer a multisig for contest `oracle`. `paymentToken` must be a standard ERC20 (no fee-on-transfer / rebasing).
 
 ## Tests
 
