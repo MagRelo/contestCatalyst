@@ -3,7 +3,6 @@ pragma solidity ^0.8.20;
 
 import "../src/ContestController.sol";
 import "./helpers/ReferralTestHarness.sol";
-import "referralTree/interfaces/IRewardDistributor.sol";
 import "../src/SecondaryPricing.sol";
 import "solmate/tokens/ERC20.sol";
 import "solady/utils/MerkleTreeLib.sol";
@@ -286,7 +285,8 @@ contract ContestControllerTest is ReferralTestHarness {
             REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
             PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
-            address(rewardDistributor),
+            address(referralGraph),
+            address(rewardCalculator),
             REFERRAL_GROUP_ID
         );
     }
@@ -300,7 +300,8 @@ contract ContestControllerTest is ReferralTestHarness {
             REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
             PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
-            address(rewardDistributor),
+            address(referralGraph),
+            address(rewardCalculator),
             REFERRAL_GROUP_ID
         );
     }
@@ -313,7 +314,8 @@ contract ContestControllerTest is ReferralTestHarness {
             REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
             PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
-            address(rewardDistributor),
+            address(referralGraph),
+            address(rewardCalculator),
             REFERRAL_GROUP_ID
         );
         ContestController freeContest = ContestController(contestAddress);
@@ -330,7 +332,8 @@ contract ContestControllerTest is ReferralTestHarness {
             REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
             PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
-            address(rewardDistributor),
+            address(referralGraph),
+            address(rewardCalculator),
             REFERRAL_GROUP_ID
         );
         ContestController freeContest = ContestController(contestAddress);
@@ -359,7 +362,8 @@ contract ContestControllerTest is ReferralTestHarness {
             1001, // > 10%
             block.timestamp + EXPIRY_OFFSET,
             PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
-            address(rewardDistributor),
+            address(referralGraph),
+            address(rewardCalculator),
             REFERRAL_GROUP_ID
         );
     }
@@ -373,7 +377,8 @@ contract ContestControllerTest is ReferralTestHarness {
             REFERRAL_NETWORK_BPS,
             block.timestamp - 1,
             PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
-            address(rewardDistributor),
+            address(referralGraph),
+            address(rewardCalculator),
             REFERRAL_GROUP_ID
         );
     }
@@ -387,7 +392,8 @@ contract ContestControllerTest is ReferralTestHarness {
             REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
             10_001,
-            address(rewardDistributor),
+            address(referralGraph),
+            address(rewardCalculator),
             REFERRAL_GROUP_ID
         );
     }
@@ -2380,6 +2386,7 @@ contract ContestControllerTest is ReferralTestHarness {
         uint256 referralFee = _referralFeeAmount(contest);
         assertGt(referralFee, 0);
 
+        uint256[] memory expectedAmounts = rewardCalculator.calculateRewards(referralFee, 1);
         uint256 referrerBefore = paymentToken.balanceOf(referrer);
         uint256 winnerBefore = paymentToken.balanceOf(winner);
 
@@ -2389,7 +2396,7 @@ contract ContestControllerTest is ReferralTestHarness {
         payouts[0] = 10_000;
         _settleContest(contest, winners, payouts);
 
-        assertGt(paymentToken.balanceOf(referrer), referrerBefore);
+        assertEq(paymentToken.balanceOf(referrer), referrerBefore + expectedAmounts[0]);
         assertEq(paymentToken.balanceOf(winner), winnerBefore);
     }
 
@@ -2410,7 +2417,8 @@ contract ContestControllerTest is ReferralTestHarness {
         zeroFee.activateContest();
 
         uint256 oracleBefore = paymentToken.balanceOf(oracle);
-        uint256 distributorBefore = paymentToken.balanceOf(address(rewardDistributor));
+        address referrer = address(0xA11);
+        uint256 referrerBefore = paymentToken.balanceOf(referrer);
 
         uint256[] memory winners = new uint256[](1);
         winners[0] = ENTRY_1;
@@ -2419,31 +2427,7 @@ contract ContestControllerTest is ReferralTestHarness {
         _settleContest(zeroFee, winners, payouts);
 
         assertEq(paymentToken.balanceOf(oracle), oracleBefore);
-        assertEq(paymentToken.balanceOf(address(rewardDistributor)), distributorBefore);
-    }
-
-    function test_settleContest_ReferralRewardMismatchReverts() public {
-        address referrer = address(0xB0B);
-        _registerWinnerReferrer(user1, referrer);
-
-        _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
-        contest.activateContest();
-
-        uint256[] memory winners = new uint256[](1);
-        winners[0] = ENTRY_1;
-        uint256[] memory payouts = new uint256[](1);
-        payouts[0] = 10_000;
-
-        uint256 referralFee = _referralFeeAmount(contest);
-        bytes32 eventId = keccak256("bad");
-        IRewardDistributor.ChainRewardData memory reward =
-            _buildReferralReward(contest, user1, referralFee, eventId);
-        bytes memory sig = _signReferralReward(reward);
-
-        vm.prank(oracle);
-        vm.expectRevert("Referral user mismatch");
-        contest.settleContest(winners, payouts, reward, sig);
+        assertEq(paymentToken.balanceOf(referrer), referrerBefore);
     }
 
     function test_claimPrimaryPayout_NoFeeDeduction() public {

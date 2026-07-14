@@ -8,8 +8,8 @@ import "solmate/utils/SafeTransferLib.sol";
 import "./PrimaryContest.sol";
 import "./SecondaryContest.sol";
 import "./SecondaryPricing.sol";
-import "referralTree/interfaces/IRewardDistributor.sol";
 import "referralTree/interfaces/IReferralGraph.sol";
+import "referralTree/interfaces/IRewardCalculator.sol";
 
 interface IERC20Balance {
     function balanceOf(address account) external view returns (uint256);
@@ -35,11 +35,13 @@ contract ContestController is ERC1155, ReentrancyGuard {
     uint256 public immutable expiryTimestamp;
     /// @notice BPS of each primary deposit credited to `secondaryPrimarySubsidyPerEntry` (no ERC1155 mint)
     uint256 public immutable primaryDepositSecondarySubsidyBps;
-    address public immutable rewardDistributor;
+    address public immutable referralGraph;
+    address public immutable rewardCalculator;
     bytes32 public immutable referralGroupId;
 
     uint256 public constant BPS_DENOMINATOR = 10000;
     uint256 public constant PRICE_PRECISION = 1e6;
+    uint256 public constant MAX_REFERRAL_PAYOUT_LEVELS = 10;
 
     enum ContestState {
         OPEN,
@@ -98,7 +100,11 @@ contract ContestController is ERC1155, ReentrancyGuard {
     event ContestClosed();
 
     event ReferralNetworkFeeDistributed(
-        address indexed winner, address indexed payoutAnchor, uint256 amount, bytes32 eventId
+        address indexed winner,
+        address indexed payoutAnchor,
+        uint256 amount,
+        address[] recipients,
+        uint256[] amounts
     );
     event ReferralNetworkFeeToOracle(address indexed winner, uint256 amount);
 
@@ -114,7 +120,8 @@ contract ContestController is ERC1155, ReentrancyGuard {
         uint256 _referralNetworkBps,
         uint256 _expiryTimestamp,
         uint256 _primaryDepositSecondarySubsidyBps,
-        address _rewardDistributor,
+        address _referralGraph,
+        address _rewardCalculator,
         bytes32 _referralGroupId
     ) ERC1155() {
         require(_paymentToken != address(0), "Invalid payment token");
@@ -122,7 +129,8 @@ contract ContestController is ERC1155, ReentrancyGuard {
         require(_referralNetworkBps <= 1000, "Referral network fee too high");
         require(_expiryTimestamp > block.timestamp, "Expiry in past");
         require(_primaryDepositSecondarySubsidyBps <= BPS_DENOMINATOR, "Subsidy bps too high");
-        require(_rewardDistributor != address(0), "Invalid reward distributor");
+        require(_referralGraph != address(0), "Invalid referral graph");
+        require(_rewardCalculator != address(0), "Invalid reward calculator");
 
         paymentToken = _paymentToken;
         oracle = _oracle;
@@ -130,7 +138,8 @@ contract ContestController is ERC1155, ReentrancyGuard {
         referralNetworkBps = _referralNetworkBps;
         expiryTimestamp = _expiryTimestamp;
         primaryDepositSecondarySubsidyBps = _primaryDepositSecondarySubsidyBps;
-        rewardDistributor = _rewardDistributor;
+        referralGraph = _referralGraph;
+        rewardCalculator = _rewardCalculator;
         referralGroupId = _referralGroupId;
 
         state = ContestState.OPEN;
@@ -308,12 +317,11 @@ contract ContestController is ERC1155, ReentrancyGuard {
         emit ContestLocked();
     }
 
-    function settleContest(
-        uint256[] calldata winningEntries,
-        uint256[] calldata payoutBps,
-        IRewardDistributor.ChainRewardData calldata referralReward,
-        bytes calldata referralSignature
-    ) external onlyOracle nonReentrant {
+    function settleContest(uint256[] calldata winningEntries, uint256[] calldata payoutBps)
+        external
+        onlyOracle
+        nonReentrant
+    {
         require(state == ContestState.ACTIVE || state == ContestState.LOCKED, "Contest not active or locked");
         require(winningEntries.length > 0, "Must have at least one winner");
         require(winningEntries.length == payoutBps.length, "Array length mismatch");
@@ -347,20 +355,26 @@ contract ContestController is ERC1155, ReentrancyGuard {
             address winner = entryOwner[winningEntries[0]];
             require(winner != address(0), "Invalid winner");
 
-            IReferralGraph referralGraph =
-                IRewardDistributor(rewardDistributor).getReferralGraph();
-            address payoutAnchor = referralGraph.getReferrer(winner, referralGroupId);
+            address payoutAnchor = IReferralGraph(referralGraph).getReferrer(winner, referralGroupId);
 
             if (payoutAnchor != address(0) && payoutAnchor != REFERRAL_ROOT) {
-                require(referralReward.totalAmount == referralFee, "Referral amount mismatch");
-                require(referralReward.user == payoutAnchor, "Referral user mismatch");
-                require(referralReward.rewardToken == paymentToken, "Referral token mismatch");
-                require(referralReward.groupId == referralGroupId, "Referral group mismatch");
+                address[] memory chain = IReferralGraph(referralGraph).getPayoutChain(
+                    payoutAnchor, referralGroupId, MAX_REFERRAL_PAYOUT_LEVELS
+                );
 
-                SafeTransferLib.safeTransfer(ERC20(paymentToken), rewardDistributor, referralFee);
-                IRewardDistributor(rewardDistributor).distributeChainRewards(referralReward, referralSignature);
-
-                emit ReferralNetworkFeeDistributed(winner, payoutAnchor, referralFee, referralReward.eventId);
+                if (chain.length == 0) {
+                    SafeTransferLib.safeTransfer(ERC20(paymentToken), oracle, referralFee);
+                    emit ReferralNetworkFeeToOracle(winner, referralFee);
+                } else {
+                    uint256[] memory amounts =
+                        IRewardCalculator(rewardCalculator).calculateRewards(referralFee, chain.length);
+                    for (uint256 i = 0; i < chain.length; i++) {
+                        if (amounts[i] > 0) {
+                            SafeTransferLib.safeTransfer(ERC20(paymentToken), chain[i], amounts[i]);
+                        }
+                    }
+                    emit ReferralNetworkFeeDistributed(winner, payoutAnchor, referralFee, chain, amounts);
+                }
             } else {
                 SafeTransferLib.safeTransfer(ERC20(paymentToken), oracle, referralFee);
                 emit ReferralNetworkFeeToOracle(winner, referralFee);

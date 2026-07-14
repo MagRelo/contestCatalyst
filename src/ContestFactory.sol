@@ -20,7 +20,8 @@ contract ContestFactory {
         uint256 referralNetworkBps,
         uint256 expiry,
         uint256 primaryDepositSecondarySubsidyBps,
-        address rewardDistributor,
+        address referralGraph,
+        address rewardCalculator,
         bytes32 referralGroupId
     ) external returns (address) {
         ContestController contest = new ContestController(
@@ -30,7 +31,8 @@ contract ContestFactory {
             referralNetworkBps,
             expiry,
             primaryDepositSecondarySubsidyBps,
-            rewardDistributor,
+            referralGraph,
+            rewardCalculator,
             referralGroupId
         );
 

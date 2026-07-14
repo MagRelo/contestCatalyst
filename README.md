@@ -47,7 +47,7 @@ CANCELLED ←───────┘
 
 - Anyone can call `cancelExpired()` if the contest has passed its expiry timestamp and is not `SETTLED` or `CLOSED`
 - **In `CANCELLED` state**: Primary and secondary participants can withdraw their positions for full refunds. No new positions can be added, and no payouts can be claimed.
-- **Referral network fee**: At settlement, `referralNetworkBps` (e.g. 5%) is deducted once from gross distributable TVL (primary pool + secondary TVL). The fee is routed through the contest’s `rewardDistributor` to the winning entry owner’s referrer chain, or to the oracle if no payable referrer exists. `claim*` and `push*` pay full net amounts with no further fee skimming.
+- **Referral network fee**: At settlement, `referralNetworkBps` (e.g. 5%) is deducted once from gross distributable TVL (primary pool + secondary TVL). The contest resolves the winning entry owner’s referrer chain via `ReferralGraph` + `RewardCalculator` and transfers the fee directly, or sends it to the oracle if no payable referrer exists. `claim*` and `push*` pay full net amounts with no further fee skimming.
 
 ## Quick Usage Guide
 
@@ -86,7 +86,7 @@ contest.claimSecondaryPayout(entryId);
 // State transitions
 contest.activateContest();        // OPEN → ACTIVE
 contest.lockContest();            // ACTIVE → LOCKED
-contest.settleContest(winningEntries, payoutBps, referralReward, referralSignature);  // LOCKED → SETTLED
+contest.settleContest(winningEntries, payoutBps);  // LOCKED → SETTLED
 
 // Optional: Push payouts for efficiency (full net amounts)
 contest.pushPrimaryPayouts(entryIds);
@@ -139,7 +139,8 @@ address contest = factory.createContest(
     referralNetworkBps,                // Referral network fee in basis points at settlement (max 1000 = 10%)
     expiry,                            // Expiration timestamp
     primaryDepositSecondarySubsidyBps, // e.g. 700 = 7%; BPS of each primary deposit to secondary subsidy (unbacked)
-    rewardDistributor,                 // Platform RewardDistributor (referralTree)
+    referralGraph,                     // Platform ReferralGraph (referralTree)
+    rewardCalculator,                  // Platform RewardCalculator (referralTree)
     referralGroupId                    // bytes32 group for ReferralGraph lookups
 );
 ```
@@ -148,7 +149,7 @@ address contest = factory.createContest(
 
 - `paymentToken`: Address of ERC20 token (typically platform token)
 - `referralNetworkBps`: 500 = 5% fee at settlement (standard in tests)
-- `rewardDistributor` / `referralGroupId`: per-contest immutables; backend typically passes the same platform values for every contest
+- `referralGraph` / `rewardCalculator` / `referralGroupId`: per-contest immutables; backend typically passes the same platform values for every contest
 - `primaryDepositSecondarySubsidyBps`: 700 = 7% (matches test and doc baselines in this repo)
 
 ## Testing Guide
