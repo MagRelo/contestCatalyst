@@ -50,7 +50,7 @@ CANCELLED ←───────┘
 - Use a multisig for `oracle` in production (#20). `paymentToken` should be a standard non-fee, non-rebasing ERC20 (#12).
 - Contest operators must trust the `referralGraph` owner / per-group authorized oracles; a live `getReferrer` at settle is intentional (#8).
 
-**Referral network fee:** At settlement, `referralNetworkBps` (≤10%) is deducted once from gross TVL. Distribution uses `ReferralGraph` + `RewardCalculator` via a try/catch path that falls back to `oracle` on failure. `claim*` / `push*` pay full net amounts.
+**Referral network fee:** At settlement, `referralNetworkBps` (≤10%) is deducted once from gross TVL. Distribution uses `ReferralGraph` + `RewardCalculator`; if the winner has no payable referrer or distribution fails, the fee returns to the primary prize pool (never to the oracle). `claim*` / `push*` pay full net amounts.
 
 ## Quick Usage Guide
 

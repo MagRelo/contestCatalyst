@@ -110,7 +110,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
         address[] recipients,
         uint256[] amounts
     );
-    event ReferralNetworkFeeToOracle(address indexed winner, uint256 amount);
+    event ReferralNetworkFeeToPrimary(address indexed winner, uint256 amount);
 
     modifier onlyOracle() {
         require(msg.sender == oracle, "Not oracle");
@@ -343,11 +343,15 @@ contract ContestController is ERC1155, ReentrancyGuard {
             address winner = entryOwner[winningEntries[0]];
             require(winner != address(0), "Invalid winner");
 
-            // Self-call so any referral dependency revert (or overpay) falls back to oracle
-            try this.distributeReferralFee(winner, referralFee) {}
-            catch {
-                SafeTransferLib.safeTransfer(ERC20(paymentToken), oracle, referralFee);
-                emit ReferralNetworkFeeToOracle(winner, referralFee);
+            // Self-call so any referral dependency revert (or overpay) returns the fee
+            // to the primary prize pool instead of aborting settlement.
+            try this.distributeReferralFee(winner, referralFee) returns (uint256 undistributed) {
+                if (undistributed > 0) {
+                    netPrimary += undistributed;
+                }
+            } catch {
+                netPrimary += referralFee;
+                emit ReferralNetworkFeeToPrimary(winner, referralFee);
             }
         }
 
@@ -393,15 +397,15 @@ contract ContestController is ERC1155, ReentrancyGuard {
     }
 
     /// @notice Referral fee distribution (self-call target for try/catch in `settleContest`)
-    function distributeReferralFee(address winner, uint256 referralFee) external {
+    /// @return undistributed Fee returned to the primary prize pool when there is no payable referrer
+    function distributeReferralFee(address winner, uint256 referralFee) external returns (uint256 undistributed) {
         require(msg.sender == address(this), "Only self");
 
         address payoutAnchor = IReferralGraph(referralGraph).getReferrer(winner, referralGroupId);
 
         if (payoutAnchor == address(0) || payoutAnchor == REFERRAL_ROOT) {
-            SafeTransferLib.safeTransfer(ERC20(paymentToken), oracle, referralFee);
-            emit ReferralNetworkFeeToOracle(winner, referralFee);
-            return;
+            emit ReferralNetworkFeeToPrimary(winner, referralFee);
+            return referralFee;
         }
 
         address[] memory chain =
@@ -414,9 +418,8 @@ contract ContestController is ERC1155, ReentrancyGuard {
         }
 
         if (chain.length == 0) {
-            SafeTransferLib.safeTransfer(ERC20(paymentToken), oracle, referralFee);
-            emit ReferralNetworkFeeToOracle(winner, referralFee);
-            return;
+            emit ReferralNetworkFeeToPrimary(winner, referralFee);
+            return referralFee;
         }
 
         uint256[] memory amounts = IRewardCalculator(rewardCalculator).calculateRewards(referralFee, chain.length);

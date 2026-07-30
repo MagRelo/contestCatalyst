@@ -2704,12 +2704,15 @@ contract ContestControllerTest is ReferralTestHarness {
         assertEq(paymentToken.balanceOf(user1), before + payout);
     }
 
-    function test_settleContest_UnregisteredWinner_FeeToOracle() public {
+    function test_settleContest_UnregisteredWinner_FeeToPrimary() public {
         _createPrimaryEntry(user1, ENTRY_1);
         _createSecondaryPosition(user2, ENTRY_1, PURCHASE_INCREMENT);
 
         uint256 referralFee = _referralFeeAmount(contest);
         uint256 oracleBefore = paymentToken.balanceOf(oracle);
+        uint256 totalPrimary = contest.primaryPrizePool();
+        uint256 netBps = 10_000 - REFERRAL_NETWORK_BPS;
+        uint256 expectedPrimaryPayout = (totalPrimary * netBps) / 10_000 + referralFee;
 
         uint256[] memory winners = new uint256[](1);
         winners[0] = ENTRY_1;
@@ -2717,7 +2720,9 @@ contract ContestControllerTest is ReferralTestHarness {
         payouts[0] = 10_000;
         _settleContest(contest, winners, payouts);
 
-        assertEq(paymentToken.balanceOf(oracle), oracleBefore + referralFee);
+        assertEq(paymentToken.balanceOf(oracle), oracleBefore);
+        assertEq(contest.primaryPrizePoolPayouts(ENTRY_1), expectedPrimaryPayout);
+        assertEq(contest.primaryPrizePool(), expectedPrimaryPayout);
     }
 
     function test_settleContest_RejectsDuplicateWinners() public {
@@ -2757,7 +2762,7 @@ contract ContestControllerTest is ReferralTestHarness {
         contest.settleContest(winners, payouts);
     }
 
-    function test_settleContest_MaliciousCalculatorFallsBackToOracle() public {
+    function test_settleContest_MaliciousCalculatorFallsBackToPrimary() public {
         MaliciousOverpayCalculator evil = new MaliciousOverpayCalculator();
         address contestAddress = factory.createContest(
             address(paymentToken),
@@ -2789,6 +2794,8 @@ contract ContestControllerTest is ReferralTestHarness {
         uint256 referralFee = _referralFeeAmount(c);
         uint256 oracleBefore = paymentToken.balanceOf(oracle);
         uint256 referrerBefore = paymentToken.balanceOf(referrer);
+        uint256 totalPrimary = c.primaryPrizePool();
+        uint256 expectedPrimaryPayout = (totalPrimary * _netBps(c)) / 10_000 + referralFee;
 
         uint256[] memory winners = new uint256[](1);
         winners[0] = ENTRY_1;
@@ -2797,11 +2804,12 @@ contract ContestControllerTest is ReferralTestHarness {
         _settleContest(c, winners, payouts);
 
         assertEq(uint8(c.state()), uint8(ContestState.SETTLED));
-        assertEq(paymentToken.balanceOf(oracle), oracleBefore + referralFee);
+        assertEq(paymentToken.balanceOf(oracle), oracleBefore);
         assertEq(paymentToken.balanceOf(referrer), referrerBefore);
+        assertEq(c.primaryPrizePoolPayouts(ENTRY_1), expectedPrimaryPayout);
     }
 
-    function test_settleContest_RevertingCalculatorFallsBackToOracle() public {
+    function test_settleContest_RevertingCalculatorFallsBackToPrimary() public {
         RevertingRewardCalculator evil = new RevertingRewardCalculator();
         address contestAddress = factory.createContest(
             address(paymentToken),
@@ -2829,6 +2837,12 @@ contract ContestControllerTest is ReferralTestHarness {
 
         uint256 referralFee = _referralFeeAmount(c);
         uint256 oracleBefore = paymentToken.balanceOf(oracle);
+        uint256 totalPrimary = c.primaryPrizePool();
+        uint256 totalSecondary = c.secondaryLiquidityPerEntry(ENTRY_1) + c.secondaryPrimarySubsidyPerEntry(ENTRY_1);
+        uint256 netBps = _netBps(c);
+        // No secondary supply → net secondary spills into primary payouts at settle
+        uint256 expectedPrimaryPayout =
+            (totalPrimary * netBps) / 10_000 + (totalSecondary * netBps) / 10_000 + referralFee;
 
         uint256[] memory winners = new uint256[](1);
         winners[0] = ENTRY_1;
@@ -2837,7 +2851,8 @@ contract ContestControllerTest is ReferralTestHarness {
         _settleContest(c, winners, payouts);
 
         assertEq(uint8(c.state()), uint8(ContestState.SETTLED));
-        assertEq(paymentToken.balanceOf(oracle), oracleBefore + referralFee);
+        assertEq(paymentToken.balanceOf(oracle), oracleBefore);
+        assertEq(c.primaryPrizePoolPayouts(ENTRY_1), expectedPrimaryPayout);
     }
 
     function test_addPrimaryPosition_MaxEntriesReached() public {
