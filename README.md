@@ -41,13 +41,14 @@ CANCELLED ←───────┘
 - **LOCKED**: Secondary closed. Oracle may settle.
 - **SETTLED**: Results in; users claim primary/secondary payouts.
 - **CANCELLED**: Refunds via remove primary/secondary.
-- **CLOSED**: After `expiryTimestamp`, from SETTLED or CANCELLED, oracle may sweep residual balance.
+- **CLOSED**: After `expiryTimestamp`, from SETTLED or CANCELLED, `emergencyRecovery` may recover residual balance (including abandoned claimables).
 
 **Operational trust / expiry notes:**
 
 - `expiryTimestamp` is the settlement deadline — the oracle must settle **before** expiry. After expiry, permissionless `cancelExpired()` is an intentional escape hatch (including when the contest is LOCKED); settling after expiry races with cancellation.
-- `closeContest` requires `SETTLED` or `CANCELLED` and expiry. Remaining balance — including any unclaimed payouts or un-refunded deposits — may be swept to the oracle and is forfeit thereafter. The oracle should wait for claims when practical; lost keys do not brick closing.
-- Use a multisig for `oracle` in production (#20). `paymentToken` should be a standard non-fee, non-rebasing ERC20 (#12).
+- Hot `oracle` settles, cancels, and pushes payouts. After push batches, any **unallocated** balance (integer-division residuals with no claimable owner) is cleared to the oracle for accounting completeness — not a fee.
+- `emergencyRecoverFunds` is cold emergency ops only (`emergencyRecovery`, must differ from `oracle`). After expiry in `SETTLED` or `CANCELLED`, it may recover the full remaining balance — including unclaimed payouts or un-refunded deposits — which is forfeit thereafter. Prefer push/claim before relying on this path.
+- Use a multisig for `oracle` and a separate cold key/multisig for `emergencyRecovery` in production (#20). `paymentToken` should be a standard non-fee, non-rebasing ERC20 (#12).
 - Contest operators must trust the `referralGraph` owner / per-group authorized oracles; a live `getReferrer` at settle is intentional (#8).
 
 **Referral network fee:** At settlement, `referralNetworkBps` (≤10%) is deducted once from gross TVL. Distribution uses `ReferralGraph` + `RewardCalculator`; if the winner has no payable referrer or distribution fails, the fee returns to the primary prize pool (never to the oracle). `claim*` / `push*` pay full net amounts.
@@ -88,7 +89,7 @@ contest.activateContest();        // OPEN → ACTIVE
 contest.lockContest();            // ACTIVE → LOCKED
 contest.settleContest(winningEntries, payoutBps);  // LOCKED → SETTLED
 
-// Optional: Push payouts for efficiency (full net amounts)
+// Optional: Push payouts for efficiency (full net amounts; clears unallocated balance to oracle)
 contest.pushPrimaryPayouts(entryIds);
 contest.pushSecondaryPayouts(participantAddresses, entryId);
 
@@ -96,7 +97,9 @@ contest.pushSecondaryPayouts(participantAddresses, entryId);
 contest.setPrimaryMerkleRoot(root);
 contest.setSecondaryMerkleRoot(root);
 contest.cancelContest();
-contest.closeContest();
+
+// Cold emergency ops (emergencyRecovery only, after expiry)
+contest.emergencyRecoverFunds();
 ```
 
 ### View Functions
@@ -134,14 +137,15 @@ Use the factory to create a new contest:
 ```solidity
 address contest = factory.createContest(
     paymentToken,                      // ERC20 token address (e.g., CUT)
-    oracle,                            // Oracle address (controls state)
+    oracle,                            // Hot oracle (state, settle, push)
     contestantDepositAmount,           // Fixed deposit for primary participants
     referralNetworkBps,                // Referral network fee in basis points at settlement (max 1000 = 10%)
     expiry,                            // Expiration timestamp
     primaryDepositSecondarySubsidyBps, // e.g. 700 = 7%; BPS of each primary deposit to secondary subsidy (unbacked)
     referralGraph,                     // Platform ReferralGraph (referralTree)
     rewardCalculator,                  // Platform RewardCalculator (referralTree)
-    referralGroupId                    // bytes32 group for ReferralGraph lookups
+    referralGroupId,                   // bytes32 group for ReferralGraph lookups
+    emergencyRecovery                  // Cold emergency ops (must differ from oracle)
 );
 ```
 
@@ -151,6 +155,7 @@ address contest = factory.createContest(
 - `referralNetworkBps`: 500 = 5% fee at settlement (standard in tests)
 - `referralGraph` / `rewardCalculator` / `referralGroupId`: per-contest immutables; backend typically passes the same platform values for every contest
 - `primaryDepositSecondarySubsidyBps`: 700 = 7% (matches test and doc baselines in this repo)
+- `emergencyRecovery`: cold key/multisig for `emergencyRecoverFunds`; must differ from `oracle`
 
 ## Testing Guide
 

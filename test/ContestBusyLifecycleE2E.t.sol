@@ -131,10 +131,10 @@ contract ContestBusyLifecycleE2E is ReferralTestHarness {
         payouts[0] = 7_000;
         payouts[1] = 3_000;
 
-        uint256 expectedReferralFee = _referralFeeAmount(contest);
         uint256 oracleBefore = paymentToken.balanceOf(oracle);
         _settleContest(contest, winners, payouts);
-        assertEq(paymentToken.balanceOf(oracle) - oracleBefore, expectedReferralFee);
+        // Unregistered winners: referral fee returns to primary — oracle unchanged at settle
+        assertEq(paymentToken.balanceOf(oracle), oracleBefore);
 
         uint256 grossSecondary = totalSecondaryBought + threeSubsidy;
         uint256 netSecondary = (grossSecondary * _netBps(contest)) / 10_000;

@@ -7,8 +7,8 @@ import "solmate/tokens/ERC20.sol";
 
 /**
  * @notice End-to-end lifecycle checks aligned with README state machine and fund-routing assumptions.
- * @dev Rounding slack: pro-rata integer division can leave wei-level dust in the contest for
- *      `closeContest`; keep assertions within `ROUNDING_SLACK`.
+ * @dev Rounding slack: pro-rata integer division can leave unallocated wei cleared on push;
+ *      keep conservation assertions within `ROUNDING_SLACK`.
  */
 contract ContestLifecycleE2E is ReferralTestHarness {
     uint256 public constant PRIMARY_DEPOSIT = 25e18;
@@ -200,19 +200,21 @@ contract ContestLifecycleE2E is ReferralTestHarness {
         assertEq(paymentToken.balanceOf(u3), u3Pre);
     }
 
-    function test_E2E_CloseContest_routesResidualToOracle() public {
+    function test_E2E_EmergencyRecoverFunds_routesResidualToEmergencyRecovery() public {
         _primary(contest, u1, ENTRY_1);
+        uint256 recoveryBefore = paymentToken.balanceOf(EMERGENCY_RECOVERY);
         uint256 oracleBefore = paymentToken.balanceOf(oracle);
 
         vm.warp(block.timestamp + EXPIRY_OFFSET + 1);
         contest.cancelExpired();
         assertEq(uint8(contest.state()), uint8(4));
 
-        vm.prank(oracle);
-        contest.closeContest();
+        vm.prank(EMERGENCY_RECOVERY);
+        contest.emergencyRecoverFunds();
 
         assertEq(uint8(contest.state()), uint8(5));
-        assertGt(paymentToken.balanceOf(oracle), oracleBefore);
+        assertGt(paymentToken.balanceOf(EMERGENCY_RECOVERY), recoveryBefore);
+        assertEq(paymentToken.balanceOf(oracle), oracleBefore);
         assertEq(contest.getSecondarySideBalance(), 0);
         assertEq(contest.getPrimarySideBalance(), 0);
     }
@@ -232,13 +234,13 @@ contract ContestLifecycleE2E is ReferralTestHarness {
 
         uint256 primaryPool = contest.primaryPrizePool();
         uint256 twoSubsidy = 2 * ((PRIMARY_DEPOSIT * PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS) / 10_000);
+        uint256 grossSecondary = PURCHASE_INCREMENT + twoSubsidy;
+        uint256 netBps = _netBps(contest);
+        uint256 expected = (primaryPool * netBps) / 10_000 + (grossSecondary * netBps) / 10_000
+            + ((primaryPool + grossSecondary) * REFERRAL_NETWORK_BPS) / 10_000;
         _settleContest(contest, winners, payouts);
 
         assertEq(contest.getSecondarySideBalance(), 0);
-        uint256 grossSecondary = PURCHASE_INCREMENT + twoSubsidy;
-        uint256 netBps = _netBps(contest);
-        uint256 expected =
-            (primaryPool * netBps) / 10_000 + (grossSecondary * netBps) / 10_000;
         assertEq(contest.primaryPrizePoolPayouts(ENTRY_1), expected);
 
         uint256 before = paymentToken.balanceOf(u1);

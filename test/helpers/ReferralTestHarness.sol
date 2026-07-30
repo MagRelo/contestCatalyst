@@ -34,6 +34,8 @@ abstract contract ReferralTestHarness is Test {
         factory = new ContestFactory();
     }
 
+    address internal constant EMERGENCY_RECOVERY = address(0xE1);
+
     function _createContest(
         address paymentToken,
         address contestOracle,
@@ -51,7 +53,8 @@ abstract contract ReferralTestHarness is Test {
             subsidyBps,
             address(referralGraph),
             address(rewardCalculator),
-            REFERRAL_GROUP_ID
+            REFERRAL_GROUP_ID,
+            EMERGENCY_RECOVERY
         );
         return ContestController(addr);
     }
