@@ -1,11 +1,22 @@
 # Contest Catalyst
 
-Combined competition format:
+On-chain financial plumbing for [Play The Cut](https://github.com/MagRelo/cut) — a sport-agnostic competition platform. The contracts do not encode golf, F1, commodities, or any other domain; they escrow stakes, run a per-entry secondary market, and settle when a trusted operator posts outcomes from off-chain scoring.
 
-- **Tournament Contest:** a traditional competition format
-- **Prediction Market:** a betting mechanism layered on top of the tournament outcomes
+## Why this design
 
-### Contract Structure
+Two jobs, one contest instance:
+
+1. **Escrow** — Hold primary deposits and secondary liquidity through a strict lifecycle (`OPEN → ACTIVE → LOCKED → SETTLED`, or `CANCELLED`). Funds move only by the rules of the state machine: join/withdraw, buy/sell-back where allowed, then claim (or push) after settlement.
+2. **Verifiable market** — Layer a bonding-curve market on contest entries (non-transferable ERC1155 shares). Prices, supply, and balances are on-chain and auditable; anyone can check what was paid, what is owed, and how settlement split the pools. Real-world winners still come from a trusted `operator` (not an on-chain oracle) — the chain verifies _money movement_, not _who won the event_.
+
+Sport-agnostic by construction: the product (scoring, lineups, consensus, ops) lives off-chain in Cut; this repo is the shared cashflow and market substrate every competition plugs into.
+
+Combined format on that substrate:
+
+- **Primary (tournament):** fixed-deposit prize pool among entrants
+- **Secondary (prediction market):** variable buys on entries, priced on a quadratic curve; settlement merges secondary TVL onto the winning entry for pro-rata redemption
+
+## Contract Structure
 
 - **[ContestFactory](src/ContestFactory.sol)**: Factory for creating new contest instances
 - **[ContestController](src/ContestController.sol)**: Main orchestrator contract managing both layers
@@ -15,7 +26,7 @@ Combined competition format:
 - **[SecondaryContest](src/SecondaryContest.sol)**: Library for secondary mechanics (position management, ERC1155 operations)
 - **[SecondaryPricing](src/SecondaryPricing.sol)**: Polynomial bonding curve (`price = BASE_PRICE + COEFFICIENT * shares²`); share supply is always 18-decimal units via `toShareUnits`, independent of payment-token decimals
 
-### Trust model: `operator` is a trusted escrow agent
+## Trust model: `operator` is a trusted escrow agent
 
 `operator` is **not** an on-chain truth oracle. It is an immutable, trusted escrow/ops agent chosen at contest creation. Participants must trust this address (prefer a multisig in production).
 
@@ -28,7 +39,7 @@ Combined competition format:
 
 This role is distinct from ReferralGraph’s per-group **authorized oracle** (referral-tree registration only).
 
-### State Machine
+## State Machine
 
 ```
 OPEN → ACTIVE → LOCKED → SETTLED
@@ -39,7 +50,7 @@ CANCELLED ←───────┘
 - **OPEN**: Primary participants join/withdraw. Secondary market is **closed**.
 - **ACTIVE**: Primary locked. Secondary buys open (non-transferable ERC1155 accounting shares).
 - **LOCKED**: Secondary closed. Operator may settle.
-- **SETTLED**: Results in; users claim primary/secondary payouts (indefinitely — no privileged residual sweep).
+- **SETTLED**: Results in; users claim primary/secondary payouts.
 - **CANCELLED**: Refunds via remove primary/secondary.
 - **CLOSED**: Enum sentinel only; unreachable on-chain.
 
