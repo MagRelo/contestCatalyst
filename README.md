@@ -2,13 +2,8 @@
 
 Combined competition format:
 
-- **Tournament Contest:** a traditional competition format with established profitability
-- **Prediction Market:** a betting mechanism layered on top of the tournament outcomes, also with proven profitability
-
-Why? By combining and balancing incentives, the system achieves more than either component could independently:
-
-- **Dynamic Incentives:** fluid movement of value between layers produces continuously changing incentives, sparking interest and driving activity
-- **Positive Feedback**: both markets become more compelling as prize pools grow which attracts more participants and amplifies engagement
+- **Tournament Contest:** a traditional competition format
+- **Prediction Market:** a betting mechanism layered on top of the tournament outcomes
 
 ### Contract Structure
 
@@ -93,7 +88,8 @@ contest.activateContest();        // OPEN → ACTIVE
 contest.lockContest();            // ACTIVE → LOCKED
 contest.settleContest(winningEntries, payoutBps, secondaryWinner);  // LOCKED → SETTLED
 
-// Optional: Push payouts for efficiency (full net amounts; allocates unallocated dust to winner pools)
+// Optional: Push payouts for efficiency (full net amounts; allocates unallocated dust to winner pools).
+// Both primary and secondary batches isolate per-recipient failures (e.g. blocklisted addresses).
 contest.pushPrimaryPayouts(entryIds);
 contest.pushSecondaryPayouts(participantAddresses, entryId);
 

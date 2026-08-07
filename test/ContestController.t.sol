@@ -2258,6 +2258,70 @@ contract ContestControllerTest is ReferralTestHarness {
         assertEq(paymentToken.balanceOf(user2), user2Before + expected);
         assertEq(contest.primaryPrizePoolPayouts(ENTRY_2), 0);
     }
+
+    function test_pushPrimaryPayouts_skipsRevertingRecipient() public {
+        MockERC20 blockedToken = new MockERC20("Blocked Token", "BLK", 18);
+        ContestController c = _createContest(
+            address(blockedToken),
+            operator,
+            PRIMARY_DEPOSIT,
+            REFERRAL_NETWORK_BPS,
+            block.timestamp + EXPIRY_OFFSET,
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
+        );
+
+        blockedToken.mint(user1, PRIMARY_DEPOSIT);
+        blockedToken.mint(user2, PRIMARY_DEPOSIT);
+        vm.prank(user1);
+        blockedToken.approve(address(c), PRIMARY_DEPOSIT);
+        vm.prank(user2);
+        blockedToken.approve(address(c), PRIMARY_DEPOSIT);
+
+        vm.prank(user1);
+        c.addPrimaryPosition(ENTRY_1, new bytes32[](0));
+        vm.prank(user2);
+        c.addPrimaryPosition(ENTRY_2, new bytes32[](0));
+
+        vm.prank(operator);
+        c.activateContest();
+        vm.prank(operator);
+        c.lockContest();
+
+        uint256[] memory winners = new uint256[](2);
+        winners[0] = ENTRY_1;
+        winners[1] = ENTRY_2;
+        uint256[] memory payouts = new uint256[](2);
+        payouts[0] = 7000;
+        payouts[1] = 3000;
+        _settleContest(c, winners, payouts);
+
+        uint256 blockedPayout = c.primaryPrizePoolPayouts(ENTRY_1);
+        uint256 okPayout = c.primaryPrizePoolPayouts(ENTRY_2);
+        assertGt(blockedPayout, 0);
+        assertGt(okPayout, 0);
+
+        blockedToken.setBlocked(user1, true);
+
+        uint256 user2Before = blockedToken.balanceOf(user2);
+        uint256[] memory entryIds = new uint256[](2);
+        entryIds[0] = ENTRY_1;
+        entryIds[1] = ENTRY_2;
+
+        vm.prank(operator);
+        c.pushPrimaryPayouts(entryIds);
+
+        // Blocklisted winner skipped; payout remains claimable. Other winner paid.
+        assertEq(c.primaryPrizePoolPayouts(ENTRY_1), blockedPayout);
+        assertEq(c.primaryPrizePoolPayouts(ENTRY_2), 0);
+        assertEq(blockedToken.balanceOf(user2), user2Before + okPayout);
+
+        blockedToken.setBlocked(user1, false);
+        uint256 user1Before = blockedToken.balanceOf(user1);
+        vm.prank(user1);
+        c.claimPrimaryPayout(ENTRY_1);
+        assertEq(blockedToken.balanceOf(user1), user1Before + blockedPayout);
+        assertEq(c.primaryPrizePoolPayouts(ENTRY_1), 0);
+    }
     
     // ============ pushSecondaryPayouts Tests ============
     
@@ -3154,12 +3218,28 @@ contract RevertingRewardCalculator {
 
 /**
  * @title MockERC20
- * @dev Simple ERC20 token for testing
+ * @dev Simple ERC20 token for testing; optional per-address transfer blocklist.
  */
 contract MockERC20 is ERC20 {
+    mapping(address => bool) public blocked;
+
     constructor(string memory name, string memory symbol, uint8 decimals) ERC20(name, symbol, decimals) {}
-    
+
     function mint(address to, uint256 amount) external {
         _mint(to, amount);
+    }
+
+    function setBlocked(address account, bool isBlocked) external {
+        blocked[account] = isBlocked;
+    }
+
+    function transfer(address to, uint256 amount) public override returns (bool) {
+        require(!blocked[msg.sender] && !blocked[to], "Blocked");
+        return super.transfer(to, amount);
+    }
+
+    function transferFrom(address from, address to, uint256 amount) public override returns (bool) {
+        require(!blocked[from] && !blocked[to], "Blocked");
+        return super.transferFrom(from, to, amount);
     }
 }

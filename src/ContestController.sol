@@ -201,17 +201,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
         PrimaryContest.validateClaimPrimaryPayout(
             entryOwner, entryId, msg.sender, uint8(state), primaryPrizePoolPayouts[entryId]
         );
-
-        uint256 payout = PrimaryContest.processClaimPrimaryPayout(primaryPrizePoolPayouts, entryId);
-
-        if (primaryPrizePool >= payout) {
-            primaryPrizePool -= payout;
-        } else {
-            primaryPrizePool = 0;
-        }
-
-        SafeTransferLib.safeTransfer(ERC20(paymentToken), msg.sender, payout);
-        emit PrimaryPayoutClaimed(msg.sender, entryId, payout);
+        _payPrimaryPayout(entryId);
     }
 
     function addSecondaryPosition(uint256 entryId, uint256 amount, bytes32[] calldata merkleProof)
@@ -517,29 +507,40 @@ contract ContestController is ERC1155, ReentrancyGuard {
 
         for (uint256 i = 0; i < entryIds.length; i++) {
             uint256 entryId = entryIds[i];
-            address owner = entryOwner[entryId];
-            if (owner == address(0)) {
+            if (entryOwner[entryId] == address(0) || primaryPrizePoolPayouts[entryId] == 0) {
                 continue;
             }
-
-            uint256 payout = primaryPrizePoolPayouts[entryId];
-            if (payout == 0) {
-                continue;
-            }
-
-            primaryPrizePoolPayouts[entryId] = 0;
-
-            if (primaryPrizePool >= payout) {
-                primaryPrizePool -= payout;
-            } else {
-                primaryPrizePool = 0;
-            }
-
-            SafeTransferLib.safeTransfer(ERC20(paymentToken), owner, payout);
-            emit PrimaryPayoutClaimed(owner, entryId, payout);
+            // Isolate per-recipient failures (e.g. blocklisted token recipient)
+            try this.payPrimaryPayoutExternal(entryId) {} catch {}
         }
 
         _allocateUnallocatedBalance();
+    }
+
+    /// @notice Self-call target so a single push recipient failure does not revert the batch
+    function payPrimaryPayoutExternal(uint256 entryId) external {
+        require(msg.sender == address(this), "Only self");
+        _payPrimaryPayout(entryId);
+    }
+
+    /// @dev Shared primary payout used by pull and push. Accounting clears inside this call so a
+    ///      reverting transfer rolls back and leaves the payout claimable.
+    function _payPrimaryPayout(uint256 entryId) internal {
+        address owner = entryOwner[entryId];
+        uint256 payout = primaryPrizePoolPayouts[entryId];
+        require(owner != address(0), "Entry withdrawn or invalid");
+        require(payout > 0, "No payout");
+
+        primaryPrizePoolPayouts[entryId] = 0;
+
+        if (primaryPrizePool >= payout) {
+            primaryPrizePool -= payout;
+        } else {
+            primaryPrizePool = 0;
+        }
+
+        SafeTransferLib.safeTransfer(ERC20(paymentToken), owner, payout);
+        emit PrimaryPayoutClaimed(owner, entryId, payout);
     }
 
     function pushSecondaryPayouts(address[] calldata participantAddresses, uint256 entryId)
