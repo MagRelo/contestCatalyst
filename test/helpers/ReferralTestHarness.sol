@@ -78,6 +78,30 @@ abstract contract ReferralTestHarness is Test {
         return (totalGross * c.referralNetworkBps()) / 10_000;
     }
 
+    /// @dev Primary/secondary shares when an undistributed referral fee is restored (S-3).
+    function _referralFeeRestoreShares(uint256 fee, uint256 totalPrimary, uint256 totalSecondary)
+        internal
+        pure
+        returns (uint256 toPrimary, uint256 toSecondary)
+    {
+        uint256 totalGross = totalPrimary + totalSecondary;
+        if (fee == 0 || totalGross == 0) return (fee, 0);
+        toSecondary = (fee * totalSecondary) / totalGross;
+        toPrimary = fee - toSecondary;
+    }
+
+    /// @dev Expected secondary pool after settle when the referral fee is fully restored (no payable referrer).
+    function _expectedNetSecondaryAfterFeeRestore(
+        uint256 totalPrimary,
+        uint256 grossSecondary,
+        uint256 referralBps
+    ) internal pure returns (uint256) {
+        uint256 totalGross = totalPrimary + grossSecondary;
+        uint256 fee = (referralBps == 0 || totalGross == 0) ? 0 : (totalGross * referralBps) / 10_000;
+        (, uint256 backToSecondary) = _referralFeeRestoreShares(fee, totalPrimary, grossSecondary);
+        return (grossSecondary * (10_000 - referralBps)) / 10_000 + backToSecondary;
+    }
+
     function _settleContest(ContestController c, uint256[] memory winningEntries, uint256[] memory payoutBps)
         internal
     {

@@ -358,14 +358,20 @@ contract ContestController is ERC1155, ReentrancyGuard {
             address winner = entryOwner[winningEntries[0]];
             require(winner != address(0), "Invalid winner");
 
-            // Self-call so any referral dependency revert (or overpay) returns the fee
-            // to the primary prize pool instead of aborting settlement.
+            // Self-call so any referral dependency revert (or overpay) restores the fee
+            // proportionally to both pools instead of aborting settlement.
             try this.distributeReferralFee(winner, referralFee) returns (uint256 undistributed) {
                 if (undistributed > 0) {
-                    netPrimary += undistributed;
+                    (uint256 toPrimary, uint256 toSecondary) =
+                        _splitReferralFeeRestore(undistributed, totalSecondary, totalGross);
+                    netPrimary += toPrimary;
+                    netSecondary += toSecondary;
                 }
             } catch {
-                netPrimary += referralFee;
+                (uint256 toPrimary, uint256 toSecondary) =
+                    _splitReferralFeeRestore(referralFee, totalSecondary, totalGross);
+                netPrimary += toPrimary;
+                netSecondary += toSecondary;
                 emit ReferralNetworkFeeToPrimary(winner, referralFee);
             }
         }
@@ -411,8 +417,18 @@ contract ContestController is ERC1155, ReentrancyGuard {
         emit ContestSettled(winningEntries, payoutBps);
     }
 
+    /// @dev Split an undistributed referral fee back across primary/secondary in proportion to gross TVL.
+    function _splitReferralFeeRestore(uint256 amount, uint256 totalSecondary, uint256 totalGross)
+        private
+        pure
+        returns (uint256 toPrimary, uint256 toSecondary)
+    {
+        toSecondary = (amount * totalSecondary) / totalGross;
+        toPrimary = amount - toSecondary;
+    }
+
     /// @notice Referral fee distribution (self-call target for try/catch in `settleContest`)
-    /// @return undistributed Fee returned to the primary prize pool when there is no payable referrer
+    /// @return undistributed Fee restored proportionally to primary and secondary pools when there is no payable referrer
     function distributeReferralFee(address winner, uint256 referralFee) external returns (uint256 undistributed) {
         require(msg.sender == address(this), "Only self");
 

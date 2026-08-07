@@ -86,11 +86,13 @@ contract ContestLifecycleE2E is ReferralTestHarness {
         uint256[] memory payouts = new uint256[](1);
         payouts[0] = 10_000;
 
-        _settleContest(contest, winners, payouts);
-
         uint256 twoSubsidy = 2 * ((PRIMARY_DEPOSIT * PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS) / 10_000);
         uint256 grossSecondary = PURCHASE_INCREMENT * 5 + twoSubsidy;
-        uint256 netSecondary = (grossSecondary * _netBps(contest)) / 10_000;
+        uint256 netSecondary = _expectedNetSecondaryAfterFeeRestore(
+            contest.primaryPrizePool(), grossSecondary, contest.referralNetworkBps()
+        );
+        _settleContest(contest, winners, payouts);
+
         assertEq(contest.getSecondarySideBalance(), netSecondary);
 
         vm.prank(u1);

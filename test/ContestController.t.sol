@@ -530,10 +530,12 @@ contract ContestControllerTest is ReferralTestHarness {
         winners[0] = ENTRY_1;
         uint256[] memory payoutBps = new uint256[](1);
         payoutBps[0] = 10_000;
-        _settleContest(c, winners, payoutBps);
 
         uint256 gross = PURCHASE_INCREMENT + (PRIMARY_DEPOSIT * 2000) / 10_000;
-        uint256 netSecondary = (gross * _netBps(c)) / 10_000;
+        uint256 netSecondary =
+            _expectedNetSecondaryAfterFeeRestore(c.primaryPrizePool(), gross, c.referralNetworkBps());
+        _settleContest(c, winners, payoutBps);
+
         assertEq(c.secondaryLiquidityPerEntry(ENTRY_1), netSecondary);
         assertEq(c.secondaryPrimarySubsidyPerEntry(ENTRY_1), 0);
     }
@@ -1299,10 +1301,6 @@ contract ContestControllerTest is ReferralTestHarness {
         uint256[] memory payouts = new uint256[](1);
         payouts[0] = 10000;
 
-        uint256 grossSecondary =
-            PURCHASE_INCREMENT * 10 + PURCHASE_INCREMENT * 5 + 2 * _standardSubsidyPerPrimaryDeposit();
-        uint256 netSecondary = (grossSecondary * _netBps(contest)) / 10_000;
-
         _settleContest(contest, winners, payouts);
         
         uint256 balanceBefore = paymentToken.balanceOf(user3);
@@ -1408,9 +1406,6 @@ contract ContestControllerTest is ReferralTestHarness {
         uint256[] memory payouts = new uint256[](1);
         payouts[0] = 10000;
 
-        uint256 grossSecondary = PURCHASE_INCREMENT * 25 + 2 * _standardSubsidyPerPrimaryDeposit();
-        uint256 netSecondary = (grossSecondary * _netBps(contest)) / 10_000;
-
         _settleContest(contest, winners, payouts);
 
         vm.prank(user3);
@@ -1445,7 +1440,9 @@ contract ContestControllerTest is ReferralTestHarness {
         winners[0] = ENTRY_1;
         uint256[] memory payouts = new uint256[](1);
         payouts[0] = 10000;
-        uint256 netSecondary = (tvlBefore * _netBps(contest)) / 10_000;
+        uint256 netSecondary = _expectedNetSecondaryAfterFeeRestore(
+            contest.primaryPrizePool(), tvlBefore, contest.referralNetworkBps()
+        );
         _settleContest(contest, winners, payouts);
 
         assertEq(contest.secondaryLiquidityPerEntry(ENTRY_2), 0);
@@ -1765,7 +1762,7 @@ contract ContestControllerTest is ReferralTestHarness {
         _settleContest(contest, winners, payouts);
 
         // All secondary TVL is merged to the winning entry; with no winning secondary supply it spills to primary payouts.
-        // Unregistered winner: referral fee returns to primary pot.
+        // Unregistered winner: referral fee is restored proportionally, then spilled secondary joins primary.
         uint256 grossSecondary = PURCHASE_INCREMENT + twoSubsidy;
         uint256 netBps = _netBps(contest);
         uint256 netPrimary = (primaryPoolBefore * netBps) / 10_000;
@@ -2892,15 +2889,19 @@ contract ContestControllerTest is ReferralTestHarness {
         assertEq(paymentToken.balanceOf(user1), before + payout);
     }
 
-    function test_settleContest_UnregisteredWinner_FeeToPrimary() public {
+    function test_settleContest_UnregisteredWinner_FeeRestoredProportionally() public {
         _createPrimaryEntry(user1, ENTRY_1);
         _createSecondaryPosition(user2, ENTRY_1, PURCHASE_INCREMENT);
 
         uint256 referralFee = _referralFeeAmount(contest);
         uint256 oracleBefore = paymentToken.balanceOf(oracle);
         uint256 totalPrimary = contest.primaryPrizePool();
+        uint256 totalSecondary = contest.getSecondarySideBalance();
         uint256 netBps = 10_000 - REFERRAL_NETWORK_BPS;
-        uint256 expectedPrimaryPayout = (totalPrimary * netBps) / 10_000 + referralFee;
+        (uint256 toPrimary, uint256 toSecondary) =
+            _referralFeeRestoreShares(referralFee, totalPrimary, totalSecondary);
+        uint256 expectedPrimaryPayout = (totalPrimary * netBps) / 10_000 + toPrimary;
+        uint256 expectedSecondary = (totalSecondary * netBps) / 10_000 + toSecondary;
 
         uint256[] memory winners = new uint256[](1);
         winners[0] = ENTRY_1;
@@ -2911,6 +2912,8 @@ contract ContestControllerTest is ReferralTestHarness {
         assertEq(paymentToken.balanceOf(oracle), oracleBefore);
         assertEq(contest.primaryPrizePoolPayouts(ENTRY_1), expectedPrimaryPayout);
         assertEq(contest.primaryPrizePool(), expectedPrimaryPayout);
+        assertEq(contest.secondaryLiquidityPerEntry(ENTRY_1), expectedSecondary);
+        assertEq(contest.getSecondarySideBalance(), expectedSecondary);
     }
 
     function test_settleContest_RejectsDuplicateWinners() public {
@@ -2950,7 +2953,7 @@ contract ContestControllerTest is ReferralTestHarness {
         contest.settleContest(winners, payouts);
     }
 
-    function test_settleContest_MaliciousCalculatorFallsBackToPrimary() public {
+    function test_settleContest_MaliciousCalculatorFallsBackProportionally() public {
         MaliciousOverpayCalculator evil = new MaliciousOverpayCalculator();
         address contestAddress = factory.createContest(
             address(paymentToken),
@@ -2984,7 +2987,11 @@ contract ContestControllerTest is ReferralTestHarness {
         uint256 oracleBefore = paymentToken.balanceOf(oracle);
         uint256 referrerBefore = paymentToken.balanceOf(referrer);
         uint256 totalPrimary = c.primaryPrizePool();
-        uint256 expectedPrimaryPayout = (totalPrimary * _netBps(c)) / 10_000 + referralFee;
+        uint256 totalSecondary = c.getSecondarySideBalance();
+        (uint256 toPrimary, uint256 toSecondary) =
+            _referralFeeRestoreShares(referralFee, totalPrimary, totalSecondary);
+        uint256 expectedPrimaryPayout = (totalPrimary * _netBps(c)) / 10_000 + toPrimary;
+        uint256 expectedSecondary = (totalSecondary * _netBps(c)) / 10_000 + toSecondary;
 
         uint256[] memory winners = new uint256[](1);
         winners[0] = ENTRY_1;
@@ -2996,9 +3003,10 @@ contract ContestControllerTest is ReferralTestHarness {
         assertEq(paymentToken.balanceOf(oracle), oracleBefore);
         assertEq(paymentToken.balanceOf(referrer), referrerBefore);
         assertEq(c.primaryPrizePoolPayouts(ENTRY_1), expectedPrimaryPayout);
+        assertEq(c.secondaryLiquidityPerEntry(ENTRY_1), expectedSecondary);
     }
 
-    function test_settleContest_RevertingCalculatorFallsBackToPrimary() public {
+    function test_settleContest_RevertingCalculatorFallsBackProportionally() public {
         RevertingRewardCalculator evil = new RevertingRewardCalculator();
         address contestAddress = factory.createContest(
             address(paymentToken),
@@ -3030,7 +3038,7 @@ contract ContestControllerTest is ReferralTestHarness {
         uint256 totalPrimary = c.primaryPrizePool();
         uint256 totalSecondary = c.secondaryLiquidityPerEntry(ENTRY_1) + c.secondaryPrimarySubsidyPerEntry(ENTRY_1);
         uint256 netBps = _netBps(c);
-        // No secondary supply → net secondary spills into primary payouts at settle
+        // No secondary supply → restored secondary share spills into primary payouts at settle
         uint256 expectedPrimaryPayout =
             (totalPrimary * netBps) / 10_000 + (totalSecondary * netBps) / 10_000 + referralFee;
 
