@@ -22,8 +22,7 @@ contract ContestFactory {
         uint256 primaryDepositSecondarySubsidyBps,
         address referralGraph,
         address rewardCalculator,
-        bytes32 referralGroupId,
-        address emergencyRecovery
+        bytes32 referralGroupId
     ) external returns (address) {
         ContestController contest = new ContestController(
             paymentToken,
@@ -34,8 +33,7 @@ contract ContestFactory {
             primaryDepositSecondarySubsidyBps,
             referralGraph,
             rewardCalculator,
-            referralGroupId,
-            emergencyRecovery
+            referralGroupId
         );
 
         address contestAddress = address(contest);

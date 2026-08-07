@@ -267,10 +267,8 @@ contract ContestControllerTest is ReferralTestHarness {
         } else if (state == ContestState.CANCELLED) {
             contest.cancelContest();
         } else if (state == ContestState.CLOSED) {
-            vm.warp(block.timestamp + EXPIRY_OFFSET);
-            contest.cancelExpired();
-            vm.prank(EMERGENCY_RECOVERY);
-            contest.emergencyRecoverFunds();
+            // CLOSED is unreachable on-chain; tests that need it should set state via a harness.
+            revert("CLOSED unreachable");
         }
     }
     
@@ -288,10 +286,10 @@ contract ContestControllerTest is ReferralTestHarness {
         
         assertEq(address(newContest.paymentToken()), address(paymentToken));
         assertEq(newContest.oracle(), oracle);
-        assertEq(newContest.emergencyRecovery(), EMERGENCY_RECOVERY);
         assertEq(newContest.primaryDepositAmount(), PRIMARY_DEPOSIT);
         assertEq(newContest.referralNetworkBps(), REFERRAL_NETWORK_BPS);
         assertEq(newContest.primaryDepositSecondarySubsidyBps(), PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS);
+        assertEq(newContest.SETTLEMENT_GRACE_PERIOD(), 1 days);
         assertEq(uint8(newContest.state()), uint8(ContestState.OPEN));
     }
     
@@ -306,8 +304,7 @@ contract ContestControllerTest is ReferralTestHarness {
             PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
             address(referralGraph),
             address(rewardCalculator),
-            REFERRAL_GROUP_ID,
-            EMERGENCY_RECOVERY
+            REFERRAL_GROUP_ID            
         );
     }
     
@@ -322,43 +319,10 @@ contract ContestControllerTest is ReferralTestHarness {
             PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
             address(referralGraph),
             address(rewardCalculator),
-            REFERRAL_GROUP_ID,
-            EMERGENCY_RECOVERY
+            REFERRAL_GROUP_ID            
         );
     }
 
-    function test_constructor_InvalidEmergencyRecovery() public {
-        vm.expectRevert("Invalid emergency recovery");
-        factory.createContest(
-            address(paymentToken),
-            oracle,
-            PRIMARY_DEPOSIT,
-            REFERRAL_NETWORK_BPS,
-            block.timestamp + EXPIRY_OFFSET,
-            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
-            address(referralGraph),
-            address(rewardCalculator),
-            REFERRAL_GROUP_ID,
-            address(0)
-        );
-    }
-
-    function test_constructor_EmergencyRecoveryEqualsOracle() public {
-        vm.expectRevert("Emergency recovery equals oracle");
-        factory.createContest(
-            address(paymentToken),
-            oracle,
-            PRIMARY_DEPOSIT,
-            REFERRAL_NETWORK_BPS,
-            block.timestamp + EXPIRY_OFFSET,
-            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
-            address(referralGraph),
-            address(rewardCalculator),
-            REFERRAL_GROUP_ID,
-            oracle
-        );
-    }
-    
     function test_constructor_ZeroDepositAmount_Succeeds() public {
         address contestAddress = factory.createContest(
             address(paymentToken),
@@ -369,8 +333,7 @@ contract ContestControllerTest is ReferralTestHarness {
             PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
             address(referralGraph),
             address(rewardCalculator),
-            REFERRAL_GROUP_ID,
-            EMERGENCY_RECOVERY
+            REFERRAL_GROUP_ID            
         );
         ContestController freeContest = ContestController(contestAddress);
         assertEq(freeContest.primaryDepositAmount(), 0);
@@ -388,8 +351,7 @@ contract ContestControllerTest is ReferralTestHarness {
             PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
             address(referralGraph),
             address(rewardCalculator),
-            REFERRAL_GROUP_ID,
-            EMERGENCY_RECOVERY
+            REFERRAL_GROUP_ID            
         );
         ContestController freeContest = ContestController(contestAddress);
         paymentToken.mint(user1, PURCHASE_INCREMENT);
@@ -419,8 +381,7 @@ contract ContestControllerTest is ReferralTestHarness {
             PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
             address(referralGraph),
             address(rewardCalculator),
-            REFERRAL_GROUP_ID,
-            EMERGENCY_RECOVERY
+            REFERRAL_GROUP_ID            
         );
     }
     
@@ -435,8 +396,7 @@ contract ContestControllerTest is ReferralTestHarness {
             PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
             address(referralGraph),
             address(rewardCalculator),
-            REFERRAL_GROUP_ID,
-            EMERGENCY_RECOVERY
+            REFERRAL_GROUP_ID            
         );
     }
 
@@ -451,8 +411,7 @@ contract ContestControllerTest is ReferralTestHarness {
             10_001,
             address(referralGraph),
             address(rewardCalculator),
-            REFERRAL_GROUP_ID,
-            EMERGENCY_RECOVERY
+            REFERRAL_GROUP_ID            
         );
     }
 
@@ -1540,7 +1499,7 @@ contract ContestControllerTest is ReferralTestHarness {
         assertEq(paymentToken.balanceOf(user3) - beforePush3, expected3);
     }
 
-    function test_pushPayouts_clearsUnallocatedBalanceToOracle() public {
+    function test_pushPayouts_allocatesUnallocatedBalanceToSecondaryPool() public {
         _createPrimaryEntry(user1, ENTRY_1);
         _createSecondaryPosition(user2, ENTRY_1, PURCHASE_INCREMENT);
 
@@ -1556,21 +1515,75 @@ contract ContestControllerTest is ReferralTestHarness {
         _settleContest(contest, winners, payouts);
         assertEq(paymentToken.balanceOf(oracle), oracleBeforeSettle);
 
-        uint256[] memory entryIds = new uint256[](1);
+        // Donate dust so balance exceeds claimable liabilities
+        uint256 dust = 7;
+        paymentToken.mint(address(contest), dust);
+        uint256 secondaryLiqBefore = contest.secondaryLiquidityPerEntry(ENTRY_1);
+        uint256 oracleBeforePush = paymentToken.balanceOf(oracle);
+
+        uint256[] memory entryIds = new uint256[](0);
+        vm.prank(oracle);
+        vm.expectEmit(false, false, false, true);
+        emit ContestController.UnallocatedBalanceAllocated(dust);
+        contest.pushPrimaryPayouts(entryIds);
+
+        assertEq(contest.secondaryLiquidityPerEntry(ENTRY_1), secondaryLiqBefore + dust);
+        assertEq(paymentToken.balanceOf(oracle), oracleBeforePush);
+        assertEq(contest.outstandingClaimableLiabilities(), contest.primaryPrizePoolPayouts(ENTRY_1) + secondaryLiqBefore + dust);
+
+        // Full push still drains without paying oracle
+        entryIds = new uint256[](1);
         entryIds[0] = ENTRY_1;
         vm.prank(oracle);
         contest.pushPrimaryPayouts(entryIds);
 
         address[] memory participants = new address[](1);
         participants[0] = user2;
-        uint256 oracleBeforePushSecondary = paymentToken.balanceOf(oracle);
+        uint256 user2Before = paymentToken.balanceOf(user2);
         vm.prank(oracle);
         contest.pushSecondaryPayouts(participants, ENTRY_1);
 
         assertEq(uint8(contest.state()), uint8(ContestState.SETTLED));
         assertEq(contest.outstandingClaimableLiabilities(), 0);
         assertEq(_getContractBalance(), 0);
-        assertGe(paymentToken.balanceOf(oracle), oracleBeforePushSecondary);
+        assertEq(paymentToken.balanceOf(oracle), oracleBeforePush);
+        assertEq(paymentToken.balanceOf(user2) - user2Before, secondaryLiqBefore + dust);
+    }
+
+    function test_pushPayouts_allocatesUnallocatedBalanceToPrimaryWhenNoSecondary() public {
+        _createPrimaryEntry(user1, ENTRY_1);
+        vm.prank(oracle);
+        contest.activateContest();
+        vm.prank(oracle);
+        contest.lockContest();
+
+        uint256[] memory winners = new uint256[](1);
+        winners[0] = ENTRY_1;
+        uint256[] memory payouts = new uint256[](1);
+        payouts[0] = 10_000;
+        _settleContest(contest, winners, payouts);
+
+        uint256 dust = 11;
+        paymentToken.mint(address(contest), dust);
+        uint256 primaryBefore = contest.primaryPrizePoolPayouts(ENTRY_1);
+        uint256 oracleBefore = paymentToken.balanceOf(oracle);
+
+        uint256[] memory entryIds = new uint256[](0);
+        vm.prank(oracle);
+        contest.pushPrimaryPayouts(entryIds);
+
+        assertEq(contest.primaryPrizePoolPayouts(ENTRY_1), primaryBefore + dust);
+        assertEq(paymentToken.balanceOf(oracle), oracleBefore);
+
+        entryIds = new uint256[](1);
+        entryIds[0] = ENTRY_1;
+        uint256 user1Before = paymentToken.balanceOf(user1);
+        vm.prank(oracle);
+        contest.pushPrimaryPayouts(entryIds);
+
+        assertEq(paymentToken.balanceOf(user1) - user1Before, primaryBefore + dust);
+        assertEq(paymentToken.balanceOf(oracle), oracleBefore);
+        assertEq(_getContractBalance(), 0);
     }
 
     function test_erc1155TransfersDisabled() public {
@@ -1996,58 +2009,70 @@ contract ContestControllerTest is ReferralTestHarness {
         contest.cancelContest();
     }
     
-    // ============ emergencyRecoverFunds Tests ============
+    // ============ cancelExpired Tests ============
+    
+    function test_cancelExpired_Success() public {
+        ContestController expiredContest = _deployContest(oracle, 1 days);
+        vm.warp(block.timestamp + 1 days + expiredContest.SETTLEMENT_GRACE_PERIOD() + 1);
+        
+        expiredContest.cancelExpired();
+        
+        assertEq(uint8(expiredContest.state()), uint8(ContestState.CANCELLED));
+    }
 
-    function test_emergencyRecoverFunds_Success() public {
+    function test_cancelExpired_GracePeriodActive() public {
         _createPrimaryEntry(user1, ENTRY_1);
         vm.warp(block.timestamp + EXPIRY_OFFSET);
-
+        vm.expectRevert("Oracle grace period active");
         contest.cancelExpired();
 
-        uint256 recoveryBefore = paymentToken.balanceOf(EMERGENCY_RECOVERY);
-        uint256 contractBalance = _getContractBalance();
-
-        vm.prank(EMERGENCY_RECOVERY);
-        vm.expectEmit(false, false, false, true);
-        emit ContestController.ContestEmergencyRecovered(contractBalance);
-        contest.emergencyRecoverFunds();
-
-        assertEq(uint8(contest.state()), uint8(ContestState.CLOSED));
-        assertEq(paymentToken.balanceOf(EMERGENCY_RECOVERY), recoveryBefore + contractBalance);
-        assertEq(_getContractBalance(), 0);
+        vm.warp(block.timestamp + contest.SETTLEMENT_GRACE_PERIOD() - 1);
+        vm.expectRevert("Oracle grace period active");
+        contest.cancelExpired();
     }
 
-    function test_emergencyRecoverFunds_RevertsFromOpen() public {
+    function test_cancelExpired_LockedDuringGrace_settleStillWorks() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.warp(block.timestamp + EXPIRY_OFFSET);
-
-        vm.prank(EMERGENCY_RECOVERY);
-        vm.expectRevert("Not terminal state");
-        contest.emergencyRecoverFunds();
-    }
-
-    function test_emergencyRecoverFunds_ExpiryNotReached() public {
-        _createPrimaryEntry(user1, ENTRY_1);
-
         vm.prank(oracle);
-        contest.cancelContest();
+        contest.activateContest();
+        vm.prank(oracle);
+        contest.lockContest();
 
-        vm.prank(EMERGENCY_RECOVERY);
-        vm.expectRevert("Expiry not reached");
-        contest.emergencyRecoverFunds();
-    }
-
-    function test_emergencyRecoverFunds_NotEmergencyRecovery() public {
-        _createPrimaryEntry(user1, ENTRY_1);
         vm.warp(block.timestamp + EXPIRY_OFFSET);
+        vm.expectRevert("Oracle grace period active");
         contest.cancelExpired();
 
+        uint256[] memory winners = new uint256[](1);
+        winners[0] = ENTRY_1;
+        uint256[] memory payouts = new uint256[](1);
+        payouts[0] = 10_000;
+        _settleContest(contest, winners, payouts);
+        assertEq(uint8(contest.state()), uint8(ContestState.SETTLED));
+        assertGt(contest.primaryPrizePoolPayouts(ENTRY_1), 0);
+    }
+    
+    function test_cancelExpired_NotExpired() public {
+        vm.expectRevert("Oracle grace period active");
+        contest.cancelExpired();
+    }
+    
+    function test_cancelExpired_AlreadySettled() public {
+        _createPrimaryEntry(user1, ENTRY_1);
         vm.prank(oracle);
-        vm.expectRevert("Not emergency recovery");
-        contest.emergencyRecoverFunds();
+        contest.activateContest();
+        
+        uint256[] memory winners = new uint256[](1);
+        winners[0] = ENTRY_1;
+        uint256[] memory payouts = new uint256[](1);
+        payouts[0] = 10000;
+        _settleContest(contest, winners, payouts);
+        
+        vm.warp(block.timestamp + EXPIRY_OFFSET + contest.SETTLEMENT_GRACE_PERIOD());
+        vm.expectRevert("Already settled");
+        contest.cancelExpired();
     }
 
-    function test_emergencyRecoverFunds_SettledAbandonedClaimables() public {
+    function test_settledAbandonedClaimablesRemainClaimable() public {
         _createPrimaryEntry(user1, ENTRY_1);
         vm.prank(oracle);
         contest.activateContest();
@@ -2063,49 +2088,12 @@ contract ContestControllerTest is ReferralTestHarness {
         uint256 abandoned = contest.primaryPrizePoolPayouts(ENTRY_1);
         assertGt(abandoned, 0);
 
-        vm.warp(block.timestamp + EXPIRY_OFFSET);
-        uint256 recoveryBefore = paymentToken.balanceOf(EMERGENCY_RECOVERY);
-        uint256 oracleBefore = paymentToken.balanceOf(oracle);
-        uint256 contractBalance = _getContractBalance();
-
-        vm.prank(EMERGENCY_RECOVERY);
-        contest.emergencyRecoverFunds();
-
-        assertEq(uint8(contest.state()), uint8(ContestState.CLOSED));
-        assertEq(paymentToken.balanceOf(EMERGENCY_RECOVERY), recoveryBefore + contractBalance);
-        assertEq(paymentToken.balanceOf(oracle), oracleBefore);
-    }
-    
-    // ============ cancelExpired Tests ============
-    
-    function test_cancelExpired_Success() public {
-        ContestController expiredContest = _deployContest(oracle, 1 days);
-        vm.warp(block.timestamp + 1 days + 1);
-        
-        expiredContest.cancelExpired();
-        
-        assertEq(uint8(expiredContest.state()), uint8(ContestState.CANCELLED));
-    }
-    
-    function test_cancelExpired_NotExpired() public {
-        vm.expectRevert("Not expired");
-        contest.cancelExpired();
-    }
-    
-    function test_cancelExpired_AlreadySettled() public {
-        _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
-        contest.activateContest();
-        
-        uint256[] memory winners = new uint256[](1);
-        winners[0] = ENTRY_1;
-        uint256[] memory payouts = new uint256[](1);
-        payouts[0] = 10000;
-        _settleContest(contest, winners, payouts);
-        
-        vm.warp(block.timestamp + EXPIRY_OFFSET);
-        vm.expectRevert("Already settled");
-        contest.cancelExpired();
+        vm.warp(block.timestamp + EXPIRY_OFFSET + contest.SETTLEMENT_GRACE_PERIOD() + 1);
+        // No privileged sweep — claim still works indefinitely after expiry
+        uint256 before = paymentToken.balanceOf(user1);
+        vm.prank(user1);
+        contest.claimPrimaryPayout(ENTRY_1);
+        assertEq(paymentToken.balanceOf(user1) - before, abandoned);
     }
     
     // ============ setPrimaryMerkleRoot Tests ============
@@ -3035,8 +3023,7 @@ contract ContestControllerTest is ReferralTestHarness {
             PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
             address(referralGraph),
             address(evil),
-            REFERRAL_GROUP_ID,
-            EMERGENCY_RECOVERY
+            REFERRAL_GROUP_ID            
         );
         ContestController c = ContestController(contestAddress);
 
@@ -3088,8 +3075,7 @@ contract ContestControllerTest is ReferralTestHarness {
             PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
             address(referralGraph),
             address(evil),
-            REFERRAL_GROUP_ID,
-            EMERGENCY_RECOVERY
+            REFERRAL_GROUP_ID            
         );
         ContestController c = ContestController(contestAddress);
 
@@ -3135,8 +3121,7 @@ contract ContestControllerTest is ReferralTestHarness {
             PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
             address(referralGraph),
             address(rewardCalculator),
-            REFERRAL_GROUP_ID,
-            EMERGENCY_RECOVERY
+            REFERRAL_GROUP_ID            
         );
         ContestController capped = ContestController(contestAddress);
 

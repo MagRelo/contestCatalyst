@@ -34,8 +34,6 @@ contract ContestController is ERC1155, ReentrancyGuard {
     /// @notice ERC20 decimals of `paymentToken` (used to normalize secondary buys into 18-dec share units)
     uint8 public immutable paymentTokenDecimals;
     address public immutable oracle;
-    /// @notice Cold emergency ops recipient for abandoned residual funds after expiry (must differ from `oracle`)
-    address public immutable emergencyRecovery;
     uint256 public immutable primaryDepositAmount;
     uint256 public immutable referralNetworkBps;
     uint256 public immutable expiryTimestamp;
@@ -50,8 +48,10 @@ contract ContestController is ERC1155, ReentrancyGuard {
     uint256 public constant BPS_DENOMINATOR = 10000;
     uint256 public constant PRICE_PRECISION = 1e6;
     uint256 public constant MAX_REFERRAL_PAYOUT_LEVELS = 10;
-    /// @notice Hard cap on concurrently active primary entries (settlement/emergency recover iterate `entries[]`)
+    /// @notice Hard cap on concurrently active primary entries (settlement iterates `entries[]`)
     uint256 public constant MAX_ENTRIES = 500;
+    /// @notice After `expiryTimestamp`, oracle-only settle window before permissionless `cancelExpired`
+    uint256 public constant SETTLEMENT_GRACE_PERIOD = 1 days;
 
     enum ContestState {
         OPEN,
@@ -59,6 +59,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
         LOCKED,
         SETTLED,
         CANCELLED,
+        /// @dev Unused / unreachable — retained as an invalid-state sentinel for validators
         CLOSED
     }
 
@@ -107,8 +108,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
     event ContestLocked();
     event ContestSettled(uint256[] winningEntries, uint256[] payouts, uint256 secondaryWinningEntry);
     event ContestCancelled();
-    event ContestEmergencyRecovered(uint256 amount);
-    event UnallocatedBalanceCleared(uint256 amount);
+    event UnallocatedBalanceAllocated(uint256 amount);
 
     event ReferralNetworkFeeDistributed(
         address indexed winner,
@@ -124,11 +124,6 @@ contract ContestController is ERC1155, ReentrancyGuard {
         _;
     }
 
-    modifier onlyEmergencyRecovery() {
-        require(msg.sender == emergencyRecovery, "Not emergency recovery");
-        _;
-    }
-
     constructor(
         address _paymentToken,
         address _oracle,
@@ -138,13 +133,10 @@ contract ContestController is ERC1155, ReentrancyGuard {
         uint256 _primaryDepositSecondarySubsidyBps,
         address _referralGraph,
         address _rewardCalculator,
-        bytes32 _referralGroupId,
-        address _emergencyRecovery
+        bytes32 _referralGroupId
     ) ERC1155() {
         require(_paymentToken != address(0), "Invalid payment token");
         require(_oracle != address(0), "Invalid oracle");
-        require(_emergencyRecovery != address(0), "Invalid emergency recovery");
-        require(_emergencyRecovery != _oracle, "Emergency recovery equals oracle");
         require(_referralNetworkBps <= 1000, "Referral network fee too high");
         require(_expiryTimestamp > block.timestamp, "Expiry in past");
         require(_primaryDepositSecondarySubsidyBps <= BPS_DENOMINATOR, "Subsidy bps too high");
@@ -155,7 +147,6 @@ contract ContestController is ERC1155, ReentrancyGuard {
         paymentTokenDecimals = ERC20(_paymentToken).decimals();
         minSecondaryPurchaseAmount = 10 ** uint256(paymentTokenDecimals);
         oracle = _oracle;
-        emergencyRecovery = _emergencyRecovery;
         primaryDepositAmount = _primaryDepositAmount;
         referralNetworkBps = _referralNetworkBps;
         expiryTimestamp = _expiryTimestamp;
@@ -488,26 +479,6 @@ contract ContestController is ERC1155, ReentrancyGuard {
         emit ContestCancelled();
     }
 
-    /// @notice Cold emergency ops: after expiry, recover the full residual balance (including abandoned claimables).
-    function emergencyRecoverFunds() external onlyEmergencyRecovery nonReentrant {
-        require(state == ContestState.SETTLED || state == ContestState.CANCELLED, "Not terminal state");
-        require(block.timestamp >= expiryTimestamp, "Expiry not reached");
-
-        uint256 remaining = IERC20Balance(paymentToken).balanceOf(address(this));
-        if (remaining > 0) {
-            primaryPrizePool = 0;
-            for (uint256 i = 0; i < entries.length; i++) {
-                uint256 eid = entries[i];
-                secondaryLiquidityPerEntry[eid] = 0;
-                secondaryPrimarySubsidyPerEntry[eid] = 0;
-            }
-
-            state = ContestState.CLOSED;
-            SafeTransferLib.safeTransfer(ERC20(paymentToken), emergencyRecovery, remaining);
-            emit ContestEmergencyRecovered(remaining);
-        }
-    }
-
     function setPrimaryMerkleRoot(bytes32 _root) external onlyOracle {
         primaryMerkleRoot = _root;
         emit PrimaryMerkleRootUpdated(_root);
@@ -518,8 +489,9 @@ contract ContestController is ERC1155, ReentrancyGuard {
         emit SecondaryMerkleRootUpdated(_root);
     }
 
+    /// @notice Permissionless cancel after expiry plus `SETTLEMENT_GRACE_PERIOD` (oracle settle priority window).
     function cancelExpired() external {
-        require(block.timestamp >= expiryTimestamp, "Not expired");
+        require(block.timestamp >= expiryTimestamp + SETTLEMENT_GRACE_PERIOD, "Oracle grace period active");
         require(state != ContestState.SETTLED && state != ContestState.CLOSED, "Already settled");
         state = ContestState.CANCELLED;
         emit ContestCancelled();
@@ -559,7 +531,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
             emit PrimaryPayoutClaimed(owner, entryId, payout);
         }
 
-        _clearUnallocatedBalance();
+        _allocateUnallocatedBalance();
     }
 
     function pushSecondaryPayouts(address[] calldata participantAddresses, uint256 entryId)
@@ -581,7 +553,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
             try this.paySecondaryClaimExternal(participant, entryId) {} catch {}
         }
 
-        _clearUnallocatedBalance();
+        _allocateUnallocatedBalance();
     }
 
     /// @notice Self-call target so a single push recipient failure does not revert the batch
@@ -592,8 +564,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
 
     /// @dev Shared pro-rata secondary claim used by pull and push paths. Pays only this entry's
     ///      tracked liquidity share — never the contract's full ERC20 balance. Unallocated wei from
-    ///      integer division is cleared on push via `_clearUnallocatedBalance`; abandoned residuals
-    ///      after expiry go through `emergencyRecoverFunds`.
+    ///      integer division is credited into claimable winner pools on push via `_allocateUnallocatedBalance`.
     function _paySecondaryClaim(address participant, uint256 entryId) internal {
         uint256 balance = balanceOf[participant][entryId];
         uint256 totalSupplyBefore = uint256(netPosition[entryId]);
@@ -707,17 +678,33 @@ contract ContestController is ERC1155, ReentrancyGuard {
         }
     }
 
-    /// @dev Transfers wei with no claimable owner (integer-division residuals) to the oracle so
-    ///      token balance stays consistent with liabilities after a push batch.
-    function _clearUnallocatedBalance() internal {
+    /// @dev Credits wei with no claimable owner (integer-division residuals / donations) into
+    ///      claimable winner pools so token balance stays consistent with liabilities after a push.
+    ///      Prefer the secondary winning pool; otherwise the first still-owed primary payout.
+    ///      If nothing remains claimable, tokens stay in the contract (no privileged transfer).
+    function _allocateUnallocatedBalance() internal {
         uint256 balance = IERC20Balance(paymentToken).balanceOf(address(this));
         uint256 liabilities = outstandingClaimableLiabilities();
         if (balance <= liabilities) {
             return;
         }
         uint256 unallocated = balance - liabilities;
-        SafeTransferLib.safeTransfer(ERC20(paymentToken), oracle, unallocated);
-        emit UnallocatedBalanceCleared(unallocated);
+
+        if (
+            secondaryLiquidityPerEntry[secondaryWinningEntry] > 0 || netPosition[secondaryWinningEntry] > 0
+        ) {
+            secondaryLiquidityPerEntry[secondaryWinningEntry] += unallocated;
+        } else {
+            for (uint256 i = 0; i < entries.length; i++) {
+                uint256 eid = entries[i];
+                if (primaryPrizePoolPayouts[eid] > 0) {
+                    primaryPrizePoolPayouts[eid] += unallocated;
+                    primaryPrizePool += unallocated;
+                    break;
+                }
+            }
+        }
+        emit UnallocatedBalanceAllocated(unallocated);
     }
 
     /// @notice Marginal bonding-curve price for `entryId` from current net ERC1155 supply

@@ -31,7 +31,7 @@ Why? By combining and balancing incentives, the system achieves more than either
 ### State Machine
 
 ```
-OPEN → ACTIVE → LOCKED → SETTLED → CLOSED
+OPEN → ACTIVE → LOCKED → SETTLED
   ↓      ↓        ↓
 CANCELLED ←───────┘
 ```
@@ -39,19 +39,19 @@ CANCELLED ←───────┘
 - **OPEN**: Primary participants join/withdraw. Secondary market is **closed**.
 - **ACTIVE**: Primary locked. Secondary buys open (non-transferable ERC1155 accounting shares).
 - **LOCKED**: Secondary closed. Oracle may settle.
-- **SETTLED**: Results in; users claim primary/secondary payouts.
+- **SETTLED**: Results in; users claim primary/secondary payouts (indefinitely — no privileged residual sweep).
 - **CANCELLED**: Refunds via remove primary/secondary.
-- **CLOSED**: After `expiryTimestamp`, from SETTLED or CANCELLED, `emergencyRecovery` may recover residual balance (including abandoned claimables).
+- **CLOSED**: Enum sentinel only; unreachable on-chain.
 
 **Operational trust / expiry notes:**
 
-- `expiryTimestamp` is the settlement deadline — the oracle must settle **before** expiry. After expiry, permissionless `cancelExpired()` is an intentional escape hatch (including when the contest is LOCKED); settling after expiry races with cancellation.
-- Hot `oracle` settles, cancels, and pushes payouts. After push batches, any **unallocated** balance (integer-division residuals with no claimable owner) is cleared to the oracle for accounting completeness — not a fee.
-- `emergencyRecoverFunds` is cold emergency ops only (`emergencyRecovery`, must differ from `oracle`). After expiry in `SETTLED` or `CANCELLED`, it may recover the full remaining balance — including unclaimed payouts or un-refunded deposits — which is forfeit thereafter. Prefer push/claim before relying on this path.
-- Use a multisig for `oracle` and a separate cold key/multisig for `emergencyRecovery` in production (#20). `paymentToken` should be a standard non-fee, non-rebasing ERC20 (#12).
+- After `expiryTimestamp`, the oracle has an exclusive `SETTLEMENT_GRACE_PERIOD` (1 day) to `settleContest` while LOCKED. Permissionless `cancelExpired()` only unlocks after `expiryTimestamp + SETTLEMENT_GRACE_PERIOD` (lost-oracle / abandoned-contest escape hatch).
+- Hot `oracle` settles, cancels, and pushes payouts. After push batches, any **unallocated** balance (integer-division residuals / donations with no claimable owner) is credited into the secondary winning pool, or else the first still-owed primary payout — never transferred to the oracle.
+- There is no `emergencyRecoverFunds` path. Unclaimed SETTLED prizes remain claimable forever; CANCELLED deposits refund via `remove*`.
+- Use a multisig for `oracle` in production. `paymentToken` should be a standard non-fee, non-rebasing ERC20 (#12).
 - Contest operators must trust the `referralGraph` owner / per-group authorized oracles; a live `getReferrer` at settle is intentional (#8).
 
-**Referral network fee:** At settlement, `referralNetworkBps` (≤10%) is deducted once from gross TVL. Distribution uses `ReferralGraph` + `RewardCalculator`; if the winner has no payable referrer or distribution fails, the fee returns to the primary prize pool (never to the oracle). `claim*` / `push*` pay full net amounts.
+**Referral network fee:** At settlement, `referralNetworkBps` (≤10%) is deducted once from gross TVL. Distribution uses `ReferralGraph` + `RewardCalculator`; if the winner has no payable referrer or distribution fails, the fee is restored proportionally to the primary and secondary pools (never to the oracle). `claim*` / `push*` pay full net amounts.
 
 ## Quick Usage Guide
 
@@ -89,7 +89,7 @@ contest.activateContest();        // OPEN → ACTIVE
 contest.lockContest();            // ACTIVE → LOCKED
 contest.settleContest(winningEntries, payoutBps, secondaryWinner);  // LOCKED → SETTLED
 
-// Optional: Push payouts for efficiency (full net amounts; clears unallocated balance to oracle)
+// Optional: Push payouts for efficiency (full net amounts; allocates unallocated dust to winner pools)
 contest.pushPrimaryPayouts(entryIds);
 contest.pushSecondaryPayouts(participantAddresses, entryId);
 
@@ -97,9 +97,6 @@ contest.pushSecondaryPayouts(participantAddresses, entryId);
 contest.setPrimaryMerkleRoot(root);
 contest.setSecondaryMerkleRoot(root);
 contest.cancelContest();
-
-// Cold emergency ops (emergencyRecovery only, after expiry)
-contest.emergencyRecoverFunds();
 ```
 
 ### View Functions
@@ -144,8 +141,7 @@ address contest = factory.createContest(
     primaryDepositSecondarySubsidyBps, // e.g. 700 = 7%; BPS of each primary deposit to secondary subsidy (unbacked)
     referralGraph,                     // Platform ReferralGraph (referralTree)
     rewardCalculator,                  // Platform RewardCalculator (referralTree)
-    referralGroupId,                   // bytes32 group for ReferralGraph lookups
-    emergencyRecovery                  // Cold emergency ops (must differ from oracle)
+    referralGroupId                    // bytes32 group for ReferralGraph lookups
 );
 ```
 
@@ -155,7 +151,7 @@ address contest = factory.createContest(
 - `referralNetworkBps`: 500 = 5% fee at settlement (standard in tests)
 - `referralGraph` / `rewardCalculator` / `referralGroupId`: per-contest immutables; backend typically passes the same platform values for every contest
 - `primaryDepositSecondarySubsidyBps`: 700 = 7% (matches test and doc baselines in this repo)
-- `emergencyRecovery`: cold key/multisig for `emergencyRecoverFunds`; must differ from `oracle`
+- `expiry`: after this timestamp, oracle has `SETTLEMENT_GRACE_PERIOD` (1 day) exclusive settle window before permissionless `cancelExpired`
 
 ## Testing Guide
 

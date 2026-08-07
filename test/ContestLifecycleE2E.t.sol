@@ -187,7 +187,7 @@ contract ContestLifecycleE2E is ReferralTestHarness {
         _primary(contest, u1, ENTRY_1);
         _secondary(contest, u3, ENTRY_1, PURCHASE_INCREMENT);
 
-        vm.warp(block.timestamp + EXPIRY_OFFSET + 1);
+        vm.warp(block.timestamp + EXPIRY_OFFSET + contest.SETTLEMENT_GRACE_PERIOD() + 1);
         contest.cancelExpired();
         assertEq(uint8(contest.state()), uint8(4));
 
@@ -202,22 +202,19 @@ contract ContestLifecycleE2E is ReferralTestHarness {
         assertEq(paymentToken.balanceOf(u3), u3Pre);
     }
 
-    function test_E2E_EmergencyRecoverFunds_routesResidualToEmergencyRecovery() public {
+    function test_E2E_CancelExpired_graceBlocksThenAllowsRefunds() public {
         _primary(contest, u1, ENTRY_1);
-        uint256 recoveryBefore = paymentToken.balanceOf(EMERGENCY_RECOVERY);
-        uint256 oracleBefore = paymentToken.balanceOf(oracle);
 
-        vm.warp(block.timestamp + EXPIRY_OFFSET + 1);
+        vm.warp(block.timestamp + EXPIRY_OFFSET);
+        vm.expectRevert("Oracle grace period active");
+        contest.cancelExpired();
+
+        vm.warp(block.timestamp + contest.SETTLEMENT_GRACE_PERIOD());
         contest.cancelExpired();
         assertEq(uint8(contest.state()), uint8(4));
 
-        vm.prank(EMERGENCY_RECOVERY);
-        contest.emergencyRecoverFunds();
-
-        assertEq(uint8(contest.state()), uint8(5));
-        assertGt(paymentToken.balanceOf(EMERGENCY_RECOVERY), recoveryBefore);
-        assertEq(paymentToken.balanceOf(oracle), oracleBefore);
-        assertEq(contest.getSecondarySideBalance(), 0);
+        vm.prank(u1);
+        contest.removePrimaryPosition(ENTRY_1);
         assertEq(contest.getPrimarySideBalance(), 0);
     }
 
