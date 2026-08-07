@@ -1,10 +1,16 @@
 # Secondary Market Pricing Guide
 
-This document explains how the secondary market pricing works with the **Polynomial Bonding Curve** mechanism.
+## What this document is (and is not)
+
+**Is:** Local mint-path / bonding-curve smell tests — how the per-entry quadratic curve mints tokens and moves spot price under scripted buys.
+
+**Is not:** Settlement economics, claim EV, `P(win)` sizing, or market-design validation. Those live in [`SecondaryPricingBreakeven.md`](SecondaryPricingBreakeven.md). Curve parameter gates live in [`SecondaryPricingTuning.md`](SecondaryPricingTuning.md).
+
+Secondary product worldview (for context only here): **pricing is local**, **redemption is global** (merged pot to `secondaryWinner`). These scenarios never settle.
 
 ## Pricing Mechanism
 
-The secondary market uses a **Polynomial Bonding Curve** pricing model:
+The secondary market uses a **Polynomial Bonding Curve**:
 
 **Price Formula**: `price = BASE_PRICE + COEFFICIENT * shares^2`
 
@@ -17,377 +23,157 @@ Where:
 
 ### Implementation Details
 
-The price calculation in code:
-
 ```solidity
 uint256 sharesSquared = (shares / 1e9) * (shares / 1e9); // shares^2 scaled to avoid overflow
 price = BASE_PRICE + (sharesSquared * COEFFICIENT) / 1e18;
 ```
 
-The scaling factors (`/ 1e9` and `/ 1e18`) are used to prevent overflow when dealing with large share values (18 decimals).
+### Key Properties (local curve)
 
-### Key Properties
+1. **Price increases quadratically with shares**
+2. **Unbounded growth** as shares increase
+3. **Early / thin-entry advantage** — lower supply → more tokens per dollar
+4. **Whale / late friction** — large purchases move price hard
+5. **Gas-efficient** arithmetic (no LMSR exponentials)
 
-1. **Price Increases Quadratically with Shares**: As more shares are purchased, price increases quadratically (shares^2)
-2. **Unbounded Growth**: Price can grow indefinitely as shares increase
-3. **Early Bettor Advantage**: Lower shares = lower price = more tokens per dollar
-4. **Whale Protection**: Large purchases cause dramatic price increases due to quadratic growth
-5. **Simple and Gas Efficient**: Basic arithmetic operations, no complex calculations
-
-## Price Behavior
-
-### Quadratic Bonding Curve
-
-The price follows a quadratic bonding curve:
-
-- When shares = 0: `price = BASE_PRICE = 1.0`
-- As shares increase: `price = BASE_PRICE + COEFFICIENT * shares^2`
-- The quadratic term (`shares^2`) means price increases faster as shares increase
-
-### Example Price Calculations
-
-With `BASE_PRICE = 1e6` and `COEFFICIENT = 15`:
-
-- **0 shares**: `price = 1e6 + (0^2 * 1) / 1e18 = 1,000,000` (1.0)
-- **1e18 shares**: `price = 1e6 + ((1e18/1e9)^2 * 1) / 1e18 = 1e6 + 1 = 1,000,001` (≈ 1.0)
-- **1e21 shares**: `price = 1e6 + ((1e21/1e9)^2 * 1) / 1e18 = 1e6 + 1e6 = 2,000,000` (2.0)
-- **1e22 shares**: `price = 1e6 + ((1e22/1e9)^2 * 1) / 1e18 = 1e6 + 1e8 = 101,000,000` (101.0)
-
-Note: The actual scaling in the implementation means the price increases very slowly for small share amounts, but accelerates dramatically as shares grow.
-
-### Example Scenarios
-
-#### Scenario 1: First Purchase on Entry
-
-- Shares: 0
-- Price: `1e6 + (0^2 * 1) / 1e18 = 1,000,000` (1.0)
-- **Final price: 1.0**
-
-#### Scenario 2: Small Purchase (1000 shares)
-
-- Shares: 1000e18
-- Price: `1e6 + ((1000e18/1e9)^2 * 1) / 1e18 = 1e6 + 1 = 1,000,001` (≈ 1.0)
-- **Price remains near base price for small share amounts**
-
-#### Scenario 3: Large Purchase (1e22 shares)
-
-- Shares: 1e22
-- Price: `1e6 + ((1e22/1e9)^2 * 1) / 1e18 = 1e6 + 1e8 = 101,000,000` (101.0)
-- **Price increases dramatically with large share amounts**
-
-#### Scenario 4: Whale Purchase (Price Increases)
-
-- Before: 1e21 shares, price ≈ 2.0
-- Whale buys tokens, increasing shares to 1e22
-- After: 1e22 shares, price ≈ 101.0
-- **Price increases significantly, protecting early buyers**
+These properties do **not** encode win probability.
 
 ## Token Purchase Calculation
 
-All purchases use the same method to ensure consistent and accurate pricing:
+All purchases use Simpson integration + binary search so cost accounts for price movement during the buy:
 
-### Integrated Cost Calculation
+1. Estimate tokens at current price
+2. Binary-search tokens such that `integrated_cost(tokens) = payment`
+3. Simpson’s rule: `∫[a to b] f(x) dx ≈ (b-a)/6 * [f(a) + 4*f((a+b)/2) + f(b)]`
 
-For all purchases, we account for price movement during the purchase using Simpson's rule integration:
-
-1. **Estimate tokens at current price**: `tokens_estimate = (payment * PRICE_PRECISION) / current_price`
-2. **Binary search bounds**: `tokensLow = tokens_estimate / 2`, `tokensHigh = tokens_estimate * 2`
-3. **Binary search**: Find tokens such that `integrated_cost(tokens) = payment`
-4. **Simpson's rule**: `∫[a to b] f(x) dx ≈ (b-a)/6 * [f(a) + 4*f((a+b)/2) + f(b)]`
-
-This ensures accurate pricing for all purchase sizes, accounting for price movement during the purchase. Even small purchases use this method for consistency and precision.
-
-### Implementation Details
-
-The binary search algorithm:
-
-- Performs up to 50 iterations
-- Stops when `tokensHigh <= tokensLow + 1`
-- Uses Simpson's rule to calculate integrated cost at each step
-- Returns `tokensLow` as the final token amount
-
-The integrated cost calculation:
-
-```solidity
-sharesStart = sharesInitial
-sharesEnd = sharesInitial + tokensToBuy
-sharesMid = (sharesStart + sharesEnd) / 2
-
-priceStart = calculatePrice(sharesStart)
-priceMid = calculatePrice(sharesMid)
-priceEnd = calculatePrice(sharesEnd)
-
-delta = sharesEnd - sharesStart
-sum = priceStart + (4 * priceMid) + priceEnd
-cost = (delta * sum) / (6 * PRICE_PRECISION)
-```
-
-## Test Results
-
-Run the tests to see actual behavior:
+## How to run
 
 ```bash
-# Unit tests for pricing functions
-forge test --match-path test/SecondaryPricing.t.sol -vv
-
-# Integration tests with real scenarios
+forge test --match-path test/SecondaryPricingSimulation.t.sol -vv
+# refresh tables:
 forge test --match-path test/SecondaryPricingSimulation.t.sol -vvv
 ```
 
+Use maximum permissions in automated environments (see [`agents.md`](../agents.md)). Keep scenario numbers aligned with the test file; refresh tables when curve constants change.
+
 ### Simulation Test Results
 
-The following tables show simulation results from test runs with **standard settings** (5% oracle fee on settled claims, `primaryDepositSecondarySubsidyBps = 700` so 7% of each primary deposit credits per-entry secondary subsidy and 93% credits `primaryPrizePool`, secondary purchases minting to the participant from the current curve supply). They illustrate how the polynomial bonding curve behaves in practice.
-
-Keep scenario numbers aligned with `forge test --match-path test/SecondaryPricingSimulation.t.sol -vv`; use `-vvv` and update tables when economics or curve constants change.
+Standard settings: `referralNetworkBps = 500` (unused by mint-path scenarios), `primaryDepositSecondarySubsidyBps = 700`, `COEFFICIENT = 15`. Tables from a live `-vvv` run.
 
 #### Scenario 1: Sequential Equal Purchases
 
-Three users each purchase $10 worth of shares on entry 1.
-
-| User   | Purchase Size | Tokens Received | % of Total Shares | Price Before | Price After | Price Change | Price Per Share |
-| ------ | ------------- | --------------- | ----------------- | ------------ | ----------- | ------------ | --------------- |
-| User 1 | $10           | 9.9997e18       | 100.00%           | 1.0000       | 1.0001      | +0.01%       | 1.0000          |
-| User 2 | $10           | 9.9977e18       | 50.00%            | 1.0001       | 1.0004      | +0.03%       | 1.0002          |
-| User 3 | $10           | 9.9937e18       | 33.33%            | 1.0004       | 1.0009      | +0.05%       | 1.0006          |
-
-**Observations:**
-
-- First purchase gets the most tokens (100% of supply initially)
-- Each subsequent purchase receives slightly fewer tokens as price increases
-- Price increases gradually for small equal purchases; each payment advances the curve from current supply
-- Price per share (amount / tokens, scaled) edges up with each purchase, showing the bonding curve effect
-
-#### Scenario 2: Mixed Purchase Sizes
-
-User 1 purchases $10, Whale purchases $1000, User 3 purchases $10.
-
-| User   | Purchase Size | Tokens Received | % of Total Shares | Price Before | Price After | Price Change | Price Per Share |
-| ------ | ------------- | --------------- | ----------------- | ------------ | ----------- | ------------ | --------------- |
-| User 1 | $10           | 9.0248e18       | 100.00%           | 1.0000       | 1.0001      | +0.00%       | 1.1081          |
-| Whale  | $1,000        | 6.6504e20       | 98.66%            | 1.0001       | 1.4544      | +45.42%      | 1.5037          |
-| User 3 | $10           | 5.2618e18       | 0.78%             | 1.4544       | 1.4615      | +0.48%       | 1.9005          |
-
-**Observations:**
-
-- Whale purchase (100x larger) moves price significantly (+45.42%)
-- Whale receives 73.7x more tokens than User 1 (less than 100x due to price movement during purchase)
-- Small purchase after whale gets fewer tokens (5.26e18 vs 9.02e18) due to higher price
-- Price per share increases dramatically for whale purchase (1.1081 → 1.5037), showing quadratic curve effect
-
-#### Scenario 3: Multiple Entries Competition
-
-Users purchase on different entries to show how prices evolve independently.
-
-| Entry   | Purchases   | Final Price | Price Ratio vs Entry 2 |
-| ------- | ----------- | ----------- | ---------------------- |
-| Entry 1 | 3 purchases | 1.0007      | 1.0006x                |
-| Entry 2 | 1 purchase  | 1.0001      | 1.0000x                |
-| Entry 3 | 0 purchases | 1.0000      | 0.9999x                |
-
-**Purchase Details for Entry 1:**
+Three users each purchase $10 on entry 1.
 
 | User   | Purchase Size | Tokens Received | Price Before | Price After | Price Change | Price Per Share |
 | ------ | ------------- | --------------- | ------------ | ----------- | ------------ | --------------- |
-| User 1 | $10           | 9.0248e18       | 1.0000       | 1.0001      | +0.00%       | 1.1081          |
-| User 2 | $10           | 9.0233e18       | 1.0001       | 1.0003      | +0.02%       | 1.1082          |
-| User 4 | $10           | 9.0204e18       | 1.0003       | 1.0007      | +0.04%       | 1.1086          |
+| User 1 | $10           | 9.9950e18       | 1.0000       | 1.0015      | +0.14%       | 1.0005          |
+| User 2 | $10           | 9.9652e18       | 1.0015       | 1.0060      | +0.44%       | 1.0035          |
+| User 3 | $10           | 9.9066e18       | 1.0060       | 1.0134      | +0.73%       | 1.0094          |
 
-**Observations:**
+**Observations:** Each subsequent `$10` receives slightly fewer tokens; spot rises gradually for small equal buys.
 
-- Each entry's price evolves independently based on its own supply
-- Entry 1 with 3 purchases has higher price (1.0007) than Entry 2 with 1 purchase (1.0001)
-- Price increases are gradual and smooth for small purchases
-- Entry 1 is ~1.0006x more expensive than Entry 2, demonstrating independent price evolution
+#### Scenario 2: Mixed Purchase Sizes
+
+User 1 `$10`, Whale `$1000`, User 3 `$10`.
+
+| User   | Purchase Size | Tokens Received | Price Before | Price After | Price Change | Price Per Share |
+| ------ | ------------- | --------------- | ------------ | ----------- | ------------ | --------------- |
+| User 1 | $10           | 9.9950e18       | 1.0000       | 1.0015      | +0.14%       | 1.0005          |
+| Whale  | $1,000        | 4.6481e20       | 1.0015       | 4.3816      | +337.50%     | 2.1514          |
+| User 3 | $10           | 2.2739e18       | 4.3816       | 4.4140      | +0.74%       | 4.3978          |
+
+**Observations:** `$1000` moves spot ~4.4×; post-whale `$10` gets ~23% of the tokens of the first `$10`.
+
+#### Scenario 3: Multiple Entries Competition
+
+| Entry   | Purchases   | Final Price |
+| ------- | ----------- | ----------- |
+| Entry 1 | 3 purchases | 1.0134      |
+| Entry 2 | 1 purchase  | 1.0015      |
+| Entry 3 | 0 purchases | 1.0000      |
+
+**Observations:** Each entry’s price evolves from its own supply only.
 
 #### Scenario 4: Early vs Late Purchases
 
-User 1 purchases early ($100), then many users purchase, then User 1 purchases again ($100).
+| Purchase | Size | Tokens Received | Price Before | Price After | Price Per Share |
+| -------- | ---- | --------------- | ------------ | ----------- | --------------- |
+| Early    | $100 | 9.5628e19       | 1.0000       | 1.1372      | 1.0457          |
+| Late     | $100 | 3.1782e19       | 2.9686       | 3.3292      | 3.1464          |
 
-| Purchase | Purchase Size | Tokens Received | Price Before | Price After | Price Change | Price Per Share |
-| -------- | ------------- | --------------- | ------------ | ----------- | ------------ | --------------- |
-| Early    | $100          | 9.0007e19       | 1.0000       | 1.0081      | +0.81%       | 1.1110          |
-| Late     | $100          | 6.2268e19       | 1.2027       | 1.2626      | +4.98%       | 1.6060          |
-
-**Observations:**
-
-- Early purchase gets 44.5% more tokens than late purchase (9.00e19 vs 6.23e19)
-- Price increased from 1.0000 to 1.2626 (26.26% increase) between purchases
-- Early bettors receive better value: 1.111 vs 1.606 price per share (44.5% better for early)
-- Price per share increases significantly for late purchase (1.111 → 1.606), showing strong early bettor advantage
+**Observations:** Early `$100` gets ~3.0× the tokens of a late `$100` after intervening volume; spot ~3.3× base by the late buy.
 
 #### Scenario 5: Whale Purchase Impact
 
-Small purchases establish baseline, then whale makes massive purchase ($10,000).
+| User   | Purchase Size | Tokens Received | Price Before | Price After | Price Change | Price Per Share |
+| ------ | ------------- | --------------- | ------------ | ----------- | ------------ | --------------- |
+| User 1 | $10           | 9.9950e18       | 1.0000       | 1.0015      | +0.14%       | 1.0005          |
+| User 2 | $10           | 9.9652e18       | 1.0015       | 1.0060      | +0.44%       | 1.0035          |
+| User 3 | $10           | 9.9066e18       | 1.0060       | 1.0134      | +0.73%       | 1.0094          |
+| Whale  | $10,000       | 1.1785e21       | 1.0134       | 22.9017     | +2159.93%    | 8.4855          |
+| User 4 | $10           | 4.3650e17       | 22.9017      | 22.9175     | +0.06%       | 22.9096         |
 
-| User   | Purchase Size | Tokens Received | % of Total Shares | Price Before | Price After | Price Change | Price Per Share |
-| ------ | ------------- | --------------- | ----------------- | ------------ | ----------- | ------------ | --------------- |
-| User 1 | $10           | 9.0248e18       | 33.33%            | 1.0000       | 1.0001      | +0.00%       | 1.1081          |
-| User 2 | $10           | 9.0233e18       | 33.33%            | 1.0001       | 1.0003      | +0.02%       | 1.1082          |
-| User 3 | $10           | 9.0204e18       | 33.33%            | 1.0003       | 1.0007      | +0.04%       | 1.1086          |
-| Whale  | $10,000       | 3.8328e21       | 99.26%            | 1.0007       | 15.8987     | +1488.71%    | 2.6090          |
-| User 4 | $10           | 4.8245e17       | 0.12%             | 15.8987      | 15.9025     | +0.02%       | 20.7275         |
+**Observations:** `$10k` whale lifts spot ~22.6× vs pre-whale; post-whale `$10` gets ~22.9× fewer tokens than the first `$10`.
 
-**Observations:**
+#### Scenario 6: Early Buyers Diluted in % Share
 
-- First three small purchases show gradual price increases (0.00%, 0.02%, 0.04%) - smooth curve
-- Whale purchase increases price dramatically by 1488.71% (from 1.0007 to 15.8987)
-- Whale receives 424.7x more tokens than baseline users (spent 1000x more)
-- Whale pays 2.35x more per share than baseline (2.609 vs 1.108) due to quadratic curve
-- Small purchase after whale gets 18.7x fewer tokens (4.82e17 vs 9.02e18) due to massive price increase
-- Price per share for User 4 is 18.7x higher than baseline (20.73 vs 1.108), showing strong whale protection
+| Buyer   | Purchase Size | Tokens Received | Share Before Whale | Share After Whale | Price Per Share |
+| ------- | ------------- | --------------- | ------------------ | ----------------- | --------------- |
+| Early 1 | $100          | 9.5628e19       | ~55%               | ~8%               | 1.0457          |
+| Early 2 | $100          | 7.8138e19       | ~45%               | ~6%               | 1.2798          |
+| Whale   | $10,000       | 1.0420e21       | —                  | ~86%              | 9.5972          |
 
-#### Scenario 6: Early Buyers Maintain Share
+**Observations:** Absolute early tokens unchanged; % share dilutes when a whale mints into the same entry. That is supply dilution, not a settlement claim.
 
-Early buyers purchase, then whale makes large purchase.
+## Deposit Flow (mint path)
 
-| Buyer   | Purchase Size | Tokens Received | Share Before Whale | Share After Whale | Share Change | Price Per Share |
-| ------- | ------------- | --------------- | ------------------ | ----------------- | ------------ | --------------- |
-| Early 1 | $100          | 9.0007e19       | 53.8%              | 2.3%              | -51.5%       | 1.1110          |
-| Early 2 | $100          | 7.7295e19       | 46.2%              | 2.0%              | -44.2%       | 1.2937          |
-| Whale   | $10,000       | 3.7312e21       | -                  | 95.7%             | -            | 2.6801          |
+When a **primary** participant deposits, `primaryDepositSecondarySubsidyBps` (standard **700**) credits that entry’s `secondaryPrimarySubsidyPerEntry` and the remainder credits `primaryPrizePool` (no ERC1155 from the carve).
 
-**Price Changes:**
+When a **secondary** participant pays `amount`:
 
-| Buyer   | Price Before | Price After | Price Change |
-| ------- | ------------ | ----------- | ------------ |
-| Early 1 | 1.0000       | 1.0081      | +0.81%       |
-| Early 2 | 1.0081       | 1.0280      | +1.97%       |
-| Whale   | 1.0280       | 16.1983     | +1475.72%    |
+1. **Minting:** `toShareUnits` then `calculateTokensFromCollateral` from current `netPosition`; ERC1155 to caller.
+2. **Liquidity:** Full `amount` → `secondaryLiquidityPerEntry[entryId]` (OPEN/CANCELLED sell-back backing).
 
-**Observations:**
-
-- Early buyers' absolute token amounts remain unchanged
-- Early buyers' percentage share decreases significantly (from ~54% and ~46% to ~2% each) due to whale's large purchase
-- Whale purchase increases price by 1475.72%, dramatically affecting subsequent purchases
-- Early buyers paid 1.111-1.294 per share, whale paid 2.680 per share (2.41x more)
-- Early buyers maintain their absolute position but are diluted by whale's purchase
-
-## Deposit Flow
-
-When a **primary** participant deposits `primaryDepositAmount` for an entry, `primaryDepositSecondarySubsidyBps` (standard **700**) credits that entry’s `secondaryPrimarySubsidyPerEntry` and the remainder credits `primaryPrizePool` (no ERC1155 mint from the carve).
-
-When a **secondary** participant pays `amount` for an entry:
-
-1. **Minting:** Payment is converted to 18-decimal share units via `toShareUnits`, then `SecondaryPricing.calculateTokensFromCollateral` prices from the entry’s current nonnegative `netPosition`; ERC1155 is minted to the caller for that share amount.
-2. **Liquidity:** The full `amount` is credited to that entry’s `secondaryLiquidityPerEntry[entryId]` (payment-token backing for OPEN/CANCELLED sell-backs on that entry). At settlement, all entries’ backed + subsidy balances are merged into the winning primary entry’s slot for pro-rata redemption by that entry’s ERC1155 holders.
-
-Oracle fees apply on settled secondary payout claims (`claimSecondaryPayout` / `pushSecondaryPayouts`), not at deposit time.
+Settlement (loan repay, referral, merge to winner) is out of scope here — see Breakeven.
 
 ## Parameters
-
-### Current Constants
 
 | Parameter         | Value | Description                             |
 | ----------------- | ----- | --------------------------------------- |
 | `PRICE_PRECISION` | 1e6   | Represents 1.0 in price calculations    |
 | `BASE_PRICE`      | 1e6   | Minimum price (1.0)                     |
-| `COEFFICIENT`     | 15    | Coefficient for quadratic term (see SecondaryPricingTuning.md) |
-
-### Contest Settings
+| `COEFFICIENT`     | 15    | Quadratic steepness (see Tuning doc)    |
 
 | Parameter                        | Value | Description                                                                 |
 | -------------------------------- | ----- | --------------------------------------------------------------------------- |
-| `referralNetworkBps`             | 500   | Referral network fee: 5% at settlement (500 basis points)                   |
-| `primaryDepositSecondarySubsidyBps` | 700 | 7% of each primary deposit to per-entry subsidy; 93% to `primaryPrizePool` |
+| `referralNetworkBps`             | 500   | Referral network fee at settlement (unused by these mint-path scenarios)    |
+| `primaryDepositSecondarySubsidyBps` | 700 | 7% carve to per-entry subsidy on deposit                                    |
 
-### Tuning Parameters
+### Tuning knobs
 
-If you need to adjust behavior:
-
-1. **`COEFFICIENT`**: Controls curve steepness
-
-   - Higher values: Steeper curve (price increases faster with shares)
-   - Lower values: Flatter curve (price increases slower with shares)
-   - Currently set to 1, scaled appropriately for shares^2
-   - Note: The scaling factors in the implementation (`/ 1e9` and `/ 1e18`) affect how this coefficient behaves
-
-2. **`BASE_PRICE`**: Controls minimum price
-   - Higher values: Higher starting price
-   - Lower values: Lower starting price
-   - Currently set to 1e6 (1.0)
+1. **`COEFFICIENT`** (production **15**): higher → steeper curve / more whale friction; lower → flatter.
+2. **`BASE_PRICE`**: minimum spot (1e6 = 1.0).
 
 ## Formula Reference
 
-### Price Calculation Flow
-
 ```
-1. Calculate sharesSquared = (shares / 1e9) * (shares / 1e9)
-2. Calculate price = BASE_PRICE + (sharesSquared * COEFFICIENT) / 1e18
-```
-
-Where:
-
-- `BASE_PRICE = 1e6` (1.0 minimum price)
-- `COEFFICIENT = 15` (controls curve steepness)
-- Price increases quadratically with shares: `price = BASE_PRICE + COEFFICIENT * shares^2`
-
-### Tokens Minted
-
-All purchases use the same calculation method:
-
-```
+sharesSquared = (shares / 1e9) * (shares / 1e9)
+price = BASE_PRICE + (sharesSquared * COEFFICIENT) / 1e18
 tokens = binary_search such that integrated_cost(tokens) = collateral
 ```
 
-Where `integrated_cost` uses Simpson's rule to account for price movement during purchase:
-
-```
-integrated_cost(shares_initial, tokens) = ∫[shares_initial to shares_initial + tokens] price(x) dx
-```
-
-Using Simpson's rule approximation:
-
-```
-cost ≈ (tokens / 6) * [price(shares_initial) + 4 * price(shares_initial + tokens/2) + price(shares_initial + tokens)]
-```
-
-This ensures consistent and accurate pricing for all purchase sizes, properly accounting for price movement during the purchase.
-
-### Mathematical Formulation
-
-For the quadratic bonding curve `price(x) = BASE_PRICE + COEFFICIENT * x^2`, the integrated cost from `shares_initial` to `shares_initial + tokens` is:
-
-```
-cost = ∫[s to s+t] (BASE_PRICE + COEFFICIENT * x^2) dx
-     = BASE_PRICE * t + COEFFICIENT * ((s+t)^3 - s^3) / 3
-```
-
-However, the implementation uses Simpson's rule for numerical integration, which provides a good approximation and is more flexible if the price formula changes in the future.
+Exact integral for `price(x) = BASE_PRICE + COEFFICIENT * x^2` exists; implementation uses Simpson for flexibility.
 
 ## Comparison to Other Models
 
-### Advantages over Constant Product
+- **Vs constant product / LMSR:** simpler gas, direct share→price map, unbounded quadratic whale friction.
+- **Vs linear curve:** stronger late/whale cost growth.
 
-- ✅ **Price Increases Quadratically with Shares**: Price grows faster as demand increases
-- ✅ **Whale Protection**: Large purchases cause significant price increases
-- ✅ **Early Bettor Advantage**: Lower shares = much lower price
-- ✅ **Unbounded**: Price can grow indefinitely
-- ✅ **Simpler**: No need to maintain constant product invariant
-
-### Advantages over LMSR
-
-- ✅ **Simpler**: No complex exponential calculations
-- ✅ **Gas Efficient**: Basic arithmetic operations (addition, multiplication, division)
-- ✅ **More Intuitive**: Price directly relates to shares via quadratic formula
-- ✅ **Deterministic**: Price depends only on shares, no external factors
-
-### Advantages over Linear Bonding Curves
-
-- ✅ **Better Whale Protection**: Quadratic growth means large purchases have exponentially more impact
-- ✅ **Stronger Early Bettor Advantage**: Price difference between early and late buyers is more pronounced
-
-## Notes
-
-- All prices are scaled by `PRICE_PRECISION = 1,000,000` (1.0 = 1,000,000)
-- Token amounts are in wei (18 decimals)
-- Price increases quadratically with shares (`price = BASE_PRICE + COEFFICIENT * shares^2`), providing strong whale protection
-- Early bettors get better prices (lower shares = lower price)
-- The bonding curve ensures price increases as demand (shares) increases
-- The scaling factors (`/ 1e9` and `/ 1e18`) in the implementation prevent overflow when dealing with large share values
+None of these comparisons imply the curve discovers `P(win)` or balances secondary books across entries.
 
 ## Model summary
 
-- **Primary:** each deposit splits per `primaryDepositSecondarySubsidyBps` (standard 7% subsidy carve, 93% to `primaryPrizePool`) until settlement claims.
-- **Secondary:** per-entry `secondaryLiquidityPerEntry` until settlement merge; each purchase applies the polynomial curve once and mints to the caller.
+- **These sims:** local curve mint behavior only.
+- **Product:** primary subsidy carve + secondary conviction market; settle merges residual secondary to winner after loan repay and referral. Size with `P(win)` — see Breakeven.
 
-Re-run `forge test --match-path test/SecondaryPricingSimulation.t.sol -vv` to refresh tables after changing economics or curve constants.
+Re-run `forge test --match-path test/SecondaryPricingSimulation.t.sol -vv` to refresh tables after changing curve constants.

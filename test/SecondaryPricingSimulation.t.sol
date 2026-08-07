@@ -9,37 +9,33 @@ import "solmate/tokens/ERC20.sol";
  * @title SecondaryContestPricingTest
  * @author MagRelo
  * @dev SIMULATION TESTS - These are NOT assertion-based unit tests
- * 
- * IMPORTANT: These tests simulate real-world buying patterns to observe how the pricing
- * mechanism behaves in practice. They do NOT contain assertions that must pass. The purpose
- * is to run these scenarios and examine the console output to verify that the pricing:
- * - Meets human intuition for fairness
- * - Passes the "smell test" for reasonable behavior
- * - Provides appropriate advantages to early bettors
- * - Protects against whale manipulation while still allowing large purchases
- * 
- * Contest Settings:
- * - Oracle fee: 5% (500 bps)
- * - primaryDepositSecondarySubsidyBps: 700 (7% of each primary deposit to per-entry subsidy; 93% to primary prize pool)
+ *
+ * SCOPE: Local mint-path / bonding-curve smell tests only.
+ * They observe how the per-entry quadratic curve mints tokens and moves spot price.
+ * They do NOT settle contests, compute claim EV, or validate market design.
+ * Settlement economics (loan repay, referral haircut, P(win), loser-float merge)
+ * live in `test/SecondaryPricingBreakeven.t.sol`.
+ *
+ * Purpose of console review:
+ * - Early-buyer advantage and whale/late friction feel reasonable
+ * - Per-entry prices evolve independently
+ * - Curve engages at realistic purchase sizes (COEFFICIENT = 15)
+ *
+ * Contest Settings (standard):
+ * - referralNetworkBps: 500 (5% at settlement; unused by these mint-path scenarios)
+ * - primaryDepositSecondarySubsidyBps: 700 (7% primary carve to per-entry subsidy)
  * - Secondary purchases mint ERC1155 to the caller from the current curve supply
- * - Primary prize pool, primary subsidy, and secondary backed liquidity are accounted separately until settlement merge
- * 
- * Run with `forge test --match-path test/SecondaryPricingSimulation.t.sol -vv` to see console output
- * and manually review whether the pricing behavior feels fair and intuitive.
- * 
- * NOTE: When updating documentation, run tests with verbose mode and capture all logs:
- *   forge test --match-path test/SecondaryPricingSimulation.t.sol -vvv > test_output.txt
- * Then format the output into tables showing purchase size, percentage of total shares,
- * price change, price (before/after), and price per share (amount spent / tokens received)
- * for each scenario. Write these tables to SecondaryPricingSimulation.md.
- * 
- * This test file illustrates 6 scenarios:
- * 1. Sequential equal purchases - price increases with each purchase
- * 2. Mixed purchase sizes - large purchases move price significantly
- * 3. Multiple entries competition - how prices change across entries
- * 4. Early vs late purchases - early users get more tokens
- * 5. Whale purchase impact - single large purchase dramatically affects pricing
- * 6. Early buyers maintain percentage share - early buyers not crowded out by whales
+ *
+ * Run: `forge test --match-path test/SecondaryPricingSimulation.t.sol -vv`
+ * Refresh docs/SecondaryPricingSimulation.md tables from -vvv output when curve constants change.
+ *
+ * Scenarios:
+ * 1. Sequential equal purchases
+ * 2. Mixed purchase sizes
+ * 3. Multiple entries (independent curves)
+ * 4. Early vs late purchases
+ * 5. Whale purchase impact
+ * 6. Early buyers diluted in % share (absolute tokens unchanged)
  */
 contract SecondaryContestPricingTest is ReferralTestHarness {
     ContestController public contest;

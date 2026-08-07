@@ -11,6 +11,8 @@ import "../src/SecondaryPricing.sol";
  * Duplicates SecondaryPricing math with tunable (shareDivisor, coefficient) so we can
  * find curve params that meet documented early-buyer / whale-friction goals without
  * mutating src/SecondaryPricing.sol.
+ * Competitive breakeven # is a sure-winner (P=1) info metric under fee-aware claimable
+ * pot (loan repay × referral) — not product EV. See SecondaryPricingBreakeven.md.
  *
  * Run: forge test --match-path test/SecondaryPricingTuning.t.sol -vv
  */
@@ -336,8 +338,8 @@ contract SecondaryPricingTuning is Test {
     }
 
     /**
-     * @dev Simplified competitive breakeven matching SecondaryPricingBreakeven economics:
-     * 5x $20 self-bets + $8.75 subsidy bootstrap pot, then two bettors alternate $10 on entry 1.
+     * @dev Sure-winner stress info metric (not product EV): matches SecondaryPricingBreakeven
+     * claimable pot = sideBalance × 0.93 (loan repay) × 0.95 (referral). P(win)=1 assumed.
      * Returns first purchase number (1-indexed) where net value <= 0, or 0 if none in 40 buys.
      */
     function _competitiveBreakevenPurchase(CurveParams memory p) internal pure returns (uint256) {
@@ -345,8 +347,9 @@ contract SecondaryPricingTuning is Test {
         // Bootstrap $20 on entry 1 (self-bet)
         (, entrySupply) = _buy(0, 20e18, p);
 
-        // Aggregate secondary TVL after 5x $20 + $8.75 subsidy
-        uint256 pot = 108.75e18;
+        // Side balance after 5x $20 + $8.75 subsidy; claimable after loan repay + referral
+        uint256 sideBalance = 108.75e18;
+        uint256 pot = (sideBalance * 9300 * 9500) / (10_000 * 10_000); // ~$96.08
         uint256 bal1;
         uint256 bal2;
 
@@ -363,7 +366,8 @@ contract SecondaryPricingTuning is Test {
             else bal2 += tokens;
 
             entrySupply = newSupply;
-            pot += PURCHASE_INCREMENT;
+            sideBalance += PURCHASE_INCREMENT;
+            pot = (sideBalance * 9300 * 9500) / (10_000 * 10_000);
 
             uint256 ownAfter = ((isBettor1 ? bal1 : bal2) * 1e18) / entrySupply;
             uint256 ownershipGain = ownAfter > ownBefore ? ownAfter - ownBefore : 0;

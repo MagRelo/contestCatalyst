@@ -47,9 +47,11 @@ The standard initial contract settings are defined in:
    - `minSecondaryPurchaseAmount = 10 ** paymentTokenDecimals` ($1 whole-token unit; dust buys revert)
    - `primaryDepositSecondarySubsidyBps = 700` (7% of each primary deposit credits `secondaryPrimarySubsidyPerEntry[entryId]`; the remainder credits `primaryPrizePool`)
    - Secondary purchases mint ERC1155 to the caller; each payment is priced along the curve from the entry's current supply.
-   - Primary subsidy is unbacked (sell-backs use backed liquidity only). At settlement, backed and subsidy merge on the winning entry for pro-rata redemption (or spill to primary payouts if there is no winning secondary supply).
+   - Primary subsidy is unbacked (sell-backs use backed liquidity only). At settlement, the same BPS of total secondary TVL (backed + subsidy) is credited back to primary (loan repay); residual secondary is haircut by referral `netBps`, then merges on `secondaryWinner` for pro-rata redemption (or spills to primary payouts if there is no winning secondary supply).
+   - Expected claimable secondary pot (when referral fee is fully paid, not restored): `sideBalance × (10000 − subsidyBps) / 10000 × (10000 − referralBps) / 10000` (standard: ×0.93 × 0.95).
+   - Worldview: pricing is local (per-entry curve); redemption is global (merged pot). Size secondary with `EV ≈ P(win) × ownership × claimablePot − cost`. Curve gates (early/whale friction) do not encode win probability. See `docs/SecondaryPricingBreakeven.md`.
 
-2. **`SecondaryPricingBreakeven.md`** - See the "Contest Configuration" section:
+2. **`docs/SecondaryPricingBreakeven.md`** - See the "Contest Configuration" section:
    - `PRIMARY_DEPOSIT`: $25
    - `referralNetworkBps`: 500 (5%)
    - `primaryDepositSecondarySubsidyBps`: 700 (7%)
@@ -64,6 +66,7 @@ The standard initial contract settings are defined in:
 - **All documentation** should reference these settings when describing contest behavior
 - **All analysis** should assume these settings unless explicitly stated otherwise
 - If different settings are needed for a specific test case, document why they differ from the standard
+- Mint-path curve smell tests: `test/SecondaryPricingSimulation.t.sol` / `docs/SecondaryPricingSimulation.md`. Settlement / claim-EV sims: `test/SecondaryPricingBreakeven.t.sol` / `docs/SecondaryPricingBreakeven.md`.
 
 This consistency ensures that:
 

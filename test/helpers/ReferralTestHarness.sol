@@ -112,6 +112,8 @@ abstract contract ReferralTestHarness is Test {
     }
 
     /// @dev Primary/secondary shares when an undistributed referral fee is restored (S-3).
+    /// @param totalPrimary Post-loan-repay primary TVL
+    /// @param totalSecondary Post-loan-repay secondary TVL
     function _referralFeeRestoreShares(uint256 fee, uint256 totalPrimary, uint256 totalSecondary)
         internal
         pure
@@ -123,16 +125,30 @@ abstract contract ReferralTestHarness is Test {
         toPrimary = fee - toSecondary;
     }
 
+    /// @dev Apply settle-time subsidy loan repay: BPS of secondary TVL credited back to primary.
+    function _applySubsidyLoanRepay(uint256 totalPrimary, uint256 grossSecondary, uint256 subsidyBps)
+        internal
+        pure
+        returns (uint256 rebalPrimary, uint256 rebalSecondary)
+    {
+        uint256 repay = (grossSecondary * subsidyBps) / 10_000;
+        rebalPrimary = totalPrimary + repay;
+        rebalSecondary = grossSecondary - repay;
+    }
+
     /// @dev Expected secondary pool after settle when the referral fee is fully restored (no payable referrer).
     function _expectedNetSecondaryAfterFeeRestore(
         uint256 totalPrimary,
         uint256 grossSecondary,
-        uint256 referralBps
+        uint256 referralBps,
+        uint256 subsidyBps
     ) internal pure returns (uint256) {
+        (uint256 rebalPrimary, uint256 rebalSecondary) =
+            _applySubsidyLoanRepay(totalPrimary, grossSecondary, subsidyBps);
         uint256 totalGross = totalPrimary + grossSecondary;
         uint256 fee = (referralBps == 0 || totalGross == 0) ? 0 : (totalGross * referralBps) / 10_000;
-        (, uint256 backToSecondary) = _referralFeeRestoreShares(fee, totalPrimary, grossSecondary);
-        return (grossSecondary * (10_000 - referralBps)) / 10_000 + backToSecondary;
+        (, uint256 backToSecondary) = _referralFeeRestoreShares(fee, rebalPrimary, rebalSecondary);
+        return (rebalSecondary * (10_000 - referralBps)) / 10_000 + backToSecondary;
     }
 
     function _settleContest(ContestController c, uint256[] memory winningEntries, uint256[] memory payoutBps)

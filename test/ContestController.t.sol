@@ -461,7 +461,7 @@ contract ContestControllerTest is ReferralTestHarness {
         assertEq(c.secondaryPrimarySubsidyPerEntry(ENTRY_1), subsidy);
     }
 
-    function test_subsidy_settlement_mergesSubsidyIntoWinnerLiquidity() public {
+    function test_subsidy_settlement_loanRepayThenResidualToWinner() public {
         ContestController c = _deployContestSubsidy(2000);
         _fundUserContest(user1, c, PRIMARY_DEPOSIT);
         vm.prank(user1);
@@ -482,12 +482,143 @@ contract ContestControllerTest is ReferralTestHarness {
         payoutBps[0] = 10_000;
 
         uint256 gross = PURCHASE_INCREMENT + (PRIMARY_DEPOSIT * 2000) / 10_000;
-        uint256 netSecondary =
-            _expectedNetSecondaryAfterFeeRestore(c.primaryPrizePool(), gross, c.referralNetworkBps());
+        uint256 netSecondary = _expectedNetSecondaryAfterFeeRestore(
+            c.primaryPrizePool(), gross, c.referralNetworkBps(), c.primaryDepositSecondarySubsidyBps()
+        );
         _settleContest(c, winners, payoutBps);
 
         assertEq(c.secondaryLiquidityPerEntry(ENTRY_1), netSecondary);
         assertEq(c.secondaryPrimarySubsidyPerEntry(ENTRY_1), 0);
+    }
+
+    /// @dev When secondary TVL equals gross primary deposits, loan repay makes primary exactly whole (pre-fee).
+    function test_subsidy_settlement_loanRepay_primaryMadeWholeWhenSecondaryEqualsGrossPrimary() public {
+        uint256 subsidyBps = 700;
+        ContestController c = _deployContestSubsidy(subsidyBps);
+        _fundUserContest(user1, c, PRIMARY_DEPOSIT);
+        vm.prank(user1);
+        c.addPrimaryPosition(ENTRY_1, new bytes32[](0));
+
+        // Need secondary TVL (backed + subsidy) == PRIMARY_DEPOSIT.
+        // subsidy = 7% of PRIMARY_DEPOSIT → backed needed = 93% of PRIMARY_DEPOSIT.
+        uint256 subsidy = (PRIMARY_DEPOSIT * subsidyBps) / 10_000;
+        uint256 backedNeeded = PRIMARY_DEPOSIT - subsidy;
+        _fundUserContest(user2, c, backedNeeded);
+        vm.prank(operator);
+        c.activateContest();
+        vm.prank(user2);
+        c.addSecondaryPosition(ENTRY_1, backedNeeded, new bytes32[](0));
+
+        assertEq(c.getSecondarySideBalance(), PRIMARY_DEPOSIT);
+
+        vm.prank(operator);
+        c.lockContest();
+
+        uint256 primaryBefore = c.primaryPrizePool();
+        uint256 grossSecondary = c.getSecondarySideBalance();
+        (uint256 rebalPrimary,) = _applySubsidyLoanRepay(primaryBefore, grossSecondary, subsidyBps);
+        assertEq(rebalPrimary, PRIMARY_DEPOSIT);
+
+        uint256[] memory winners = new uint256[](1);
+        winners[0] = ENTRY_1;
+        uint256[] memory payoutBps = new uint256[](1);
+        payoutBps[0] = 10_000;
+
+        uint256 netSecondary = _expectedNetSecondaryAfterFeeRestore(
+            primaryBefore, grossSecondary, c.referralNetworkBps(), subsidyBps
+        );
+        (uint256 expectedPrimary,) = _applySubsidyLoanRepay(primaryBefore, grossSecondary, subsidyBps);
+        uint256 totalGross = primaryBefore + grossSecondary;
+        uint256 fee = (totalGross * c.referralNetworkBps()) / 10_000;
+        (uint256 toPrimary,) = _referralFeeRestoreShares(fee, expectedPrimary, grossSecondary - (grossSecondary * subsidyBps) / 10_000);
+        uint256 expectedPrimaryPayout = (expectedPrimary * _netBps(c)) / 10_000 + toPrimary;
+
+        _settleContest(c, winners, payoutBps);
+
+        assertEq(c.primaryPrizePoolPayouts(ENTRY_1), expectedPrimaryPayout);
+        assertEq(c.secondaryLiquidityPerEntry(ENTRY_1), netSecondary);
+    }
+
+    /// @dev When secondary TVL exceeds gross primary deposits, primary ends above gross (pre-fee).
+    function test_subsidy_settlement_loanRepay_primaryBenefitsWhenSecondaryExceedsGrossPrimary() public {
+        uint256 subsidyBps = 700;
+        ContestController c = _deployContestSubsidy(subsidyBps);
+        _fundUserContest(user1, c, PRIMARY_DEPOSIT);
+        vm.prank(user1);
+        c.addPrimaryPosition(ENTRY_1, new bytes32[](0));
+
+        uint256 largeSecondary = PRIMARY_DEPOSIT * 2; // backed; plus subsidy → S >> primary gross
+        _fundUserContest(user2, c, largeSecondary);
+        vm.prank(operator);
+        c.activateContest();
+        vm.prank(user2);
+        c.addSecondaryPosition(ENTRY_1, largeSecondary, new bytes32[](0));
+
+        uint256 primaryBefore = c.primaryPrizePool();
+        uint256 grossSecondary = c.getSecondarySideBalance();
+        assertGt(grossSecondary, PRIMARY_DEPOSIT);
+
+        (uint256 rebalPrimary,) = _applySubsidyLoanRepay(primaryBefore, grossSecondary, subsidyBps);
+        assertGt(rebalPrimary, PRIMARY_DEPOSIT);
+
+        vm.prank(operator);
+        c.lockContest();
+        uint256[] memory winners = new uint256[](1);
+        winners[0] = ENTRY_1;
+        uint256[] memory payoutBps = new uint256[](1);
+        payoutBps[0] = 10_000;
+
+        uint256 residualSecondary = grossSecondary - (grossSecondary * subsidyBps) / 10_000;
+        uint256 totalGross = primaryBefore + grossSecondary;
+        uint256 fee = (totalGross * c.referralNetworkBps()) / 10_000;
+        (uint256 toPrimary,) = _referralFeeRestoreShares(fee, rebalPrimary, residualSecondary);
+        uint256 expectedPrimaryPayout = (rebalPrimary * _netBps(c)) / 10_000 + toPrimary;
+
+        _settleContest(c, winners, payoutBps);
+        assertEq(c.primaryPrizePoolPayouts(ENTRY_1), expectedPrimaryPayout);
+        assertGt(c.primaryPrizePoolPayouts(ENTRY_1), (PRIMARY_DEPOSIT * _netBps(c)) / 10_000);
+    }
+
+    /// @dev When secondary TVL is below gross primary deposits, primary is only partially restored (pre-fee).
+    function test_subsidy_settlement_loanRepay_primaryPartiallyRestoredWhenSecondaryBelowGrossPrimary() public {
+        uint256 subsidyBps = 700;
+        ContestController c = _deployContestSubsidy(subsidyBps);
+        _fundUserContest(user1, c, PRIMARY_DEPOSIT);
+        vm.prank(user1);
+        c.addPrimaryPosition(ENTRY_1, new bytes32[](0));
+
+        // Small backed buy so residual secondary does not spill; S still << primary gross
+        _fundUserContest(user2, c, PURCHASE_INCREMENT);
+        vm.prank(operator);
+        c.activateContest();
+        vm.prank(user2);
+        c.addSecondaryPosition(ENTRY_1, PURCHASE_INCREMENT, new bytes32[](0));
+
+        uint256 primaryBefore = c.primaryPrizePool();
+        uint256 grossSecondary = c.getSecondarySideBalance();
+        assertLt(grossSecondary, PRIMARY_DEPOSIT);
+
+        (uint256 rebalPrimary, uint256 rebalSecondary) =
+            _applySubsidyLoanRepay(primaryBefore, grossSecondary, subsidyBps);
+        assertLt(rebalPrimary, PRIMARY_DEPOSIT);
+        assertGt(rebalPrimary, primaryBefore);
+
+        vm.prank(operator);
+        c.lockContest();
+        uint256[] memory winners = new uint256[](1);
+        winners[0] = ENTRY_1;
+        uint256[] memory payoutBps = new uint256[](1);
+        payoutBps[0] = 10_000;
+
+        uint256 totalGross = primaryBefore + grossSecondary;
+        uint256 fee = (totalGross * c.referralNetworkBps()) / 10_000;
+        (uint256 toPrimary,) = _referralFeeRestoreShares(fee, rebalPrimary, rebalSecondary);
+        uint256 expectedPrimaryPayout = (rebalPrimary * _netBps(c)) / 10_000 + toPrimary;
+
+        _settleContest(c, winners, payoutBps);
+        assertEq(c.primaryPrizePoolPayouts(ENTRY_1), expectedPrimaryPayout);
+        // After fee restore, primary payout is still below gross primary deposits
+        assertLt(c.primaryPrizePoolPayouts(ENTRY_1), PRIMARY_DEPOSIT);
     }
     
     // ============ Primary Position Tests ============
@@ -1389,7 +1520,10 @@ contract ContestControllerTest is ReferralTestHarness {
         uint256[] memory payouts = new uint256[](1);
         payouts[0] = 10000;
         uint256 netSecondary = _expectedNetSecondaryAfterFeeRestore(
-            contest.primaryPrizePool(), tvlBefore, contest.referralNetworkBps()
+            contest.primaryPrizePool(),
+            tvlBefore,
+            contest.referralNetworkBps(),
+            contest.primaryDepositSecondarySubsidyBps()
         );
         _settleContest(contest, winners, payouts);
 
@@ -3003,11 +3137,13 @@ contract ContestControllerTest is ReferralTestHarness {
         uint256 operatorBefore = paymentToken.balanceOf(operator);
         uint256 totalPrimary = contest.primaryPrizePool();
         uint256 totalSecondary = contest.getSecondarySideBalance();
+        (uint256 rebalPrimary, uint256 rebalSecondary) =
+            _applySubsidyLoanRepay(totalPrimary, totalSecondary, PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS);
         uint256 netBps = 10_000 - REFERRAL_NETWORK_BPS;
         (uint256 toPrimary, uint256 toSecondary) =
-            _referralFeeRestoreShares(referralFee, totalPrimary, totalSecondary);
-        uint256 expectedPrimaryPayout = (totalPrimary * netBps) / 10_000 + toPrimary;
-        uint256 expectedSecondary = (totalSecondary * netBps) / 10_000 + toSecondary;
+            _referralFeeRestoreShares(referralFee, rebalPrimary, rebalSecondary);
+        uint256 expectedPrimaryPayout = (rebalPrimary * netBps) / 10_000 + toPrimary;
+        uint256 expectedSecondary = (rebalSecondary * netBps) / 10_000 + toSecondary;
 
         uint256[] memory winners = new uint256[](1);
         winners[0] = ENTRY_1;
@@ -3091,10 +3227,12 @@ contract ContestControllerTest is ReferralTestHarness {
         uint256 referrerBefore = paymentToken.balanceOf(referrer);
         uint256 totalPrimary = c.primaryPrizePool();
         uint256 totalSecondary = c.getSecondarySideBalance();
+        (uint256 rebalPrimary, uint256 rebalSecondary) =
+            _applySubsidyLoanRepay(totalPrimary, totalSecondary, PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS);
         (uint256 toPrimary, uint256 toSecondary) =
-            _referralFeeRestoreShares(referralFee, totalPrimary, totalSecondary);
-        uint256 expectedPrimaryPayout = (totalPrimary * _netBps(c)) / 10_000 + toPrimary;
-        uint256 expectedSecondary = (totalSecondary * _netBps(c)) / 10_000 + toSecondary;
+            _referralFeeRestoreShares(referralFee, rebalPrimary, rebalSecondary);
+        uint256 expectedPrimaryPayout = (rebalPrimary * _netBps(c)) / 10_000 + toPrimary;
+        uint256 expectedSecondary = (rebalSecondary * _netBps(c)) / 10_000 + toSecondary;
 
         uint256[] memory winners = new uint256[](1);
         winners[0] = ENTRY_1;
@@ -3180,10 +3318,12 @@ contract ContestControllerTest is ReferralTestHarness {
         uint256 referrerBefore = paymentToken.balanceOf(referrer);
         uint256 totalPrimary = c.primaryPrizePool();
         uint256 totalSecondary = c.getSecondarySideBalance();
+        (uint256 rebalPrimary, uint256 rebalSecondary) =
+            _applySubsidyLoanRepay(totalPrimary, totalSecondary, PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS);
         (uint256 toPrimary, uint256 toSecondary) =
-            _referralFeeRestoreShares(shortfall, totalPrimary, totalSecondary);
-        uint256 expectedPrimaryPayout = (totalPrimary * _netBps(c)) / 10_000 + toPrimary;
-        uint256 expectedSecondary = (totalSecondary * _netBps(c)) / 10_000 + toSecondary;
+            _referralFeeRestoreShares(shortfall, rebalPrimary, rebalSecondary);
+        uint256 expectedPrimaryPayout = (rebalPrimary * _netBps(c)) / 10_000 + toPrimary;
+        uint256 expectedSecondary = (rebalSecondary * _netBps(c)) / 10_000 + toSecondary;
 
         uint256[] memory winners = new uint256[](1);
         winners[0] = ENTRY_1;

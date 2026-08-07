@@ -87,7 +87,10 @@ contract ContestLifecycleE2E is ReferralTestHarness {
         uint256 twoSubsidy = 2 * ((PRIMARY_DEPOSIT * PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS) / 10_000);
         uint256 grossSecondary = PURCHASE_INCREMENT * 5 + twoSubsidy;
         uint256 netSecondary = _expectedNetSecondaryAfterFeeRestore(
-            contest.primaryPrizePool(), grossSecondary, contest.referralNetworkBps()
+            contest.primaryPrizePool(),
+            grossSecondary,
+            contest.referralNetworkBps(),
+            contest.primaryDepositSecondarySubsidyBps()
         );
         _settleContest(contest, winners, payouts);
 

@@ -136,8 +136,12 @@ contract ContestBusyLifecycleE2E is ReferralTestHarness {
         assertEq(paymentToken.balanceOf(operator), operatorBefore);
 
         uint256 grossSecondary = totalSecondaryBought + threeSubsidy;
-        uint256 netSecondary =
-            _expectedNetSecondaryAfterFeeRestore(primaryBefore, grossSecondary, contest.referralNetworkBps());
+        uint256 netSecondary = _expectedNetSecondaryAfterFeeRestore(
+            primaryBefore,
+            grossSecondary,
+            contest.referralNetworkBps(),
+            contest.primaryDepositSecondarySubsidyBps()
+        );
         assertEq(contest.secondaryLiquidityPerEntry(ENTRY_2), netSecondary);
         assertEq(contest.secondaryLiquidityPerEntry(ENTRY_1), 0);
         assertEq(contest.secondaryLiquidityPerEntry(ENTRY_3), 0);

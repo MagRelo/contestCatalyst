@@ -2,7 +2,7 @@
 
 **Status:** recommendation only — `src/SecondaryPricing.sol` constants are **unchanged** in this pass.
 
-This document captures results from the Forge parameter sweep in [`test/SecondaryPricingTuning.t.sol`](test/SecondaryPricingTuning.t.sol). The sweep retunes the quadratic bonding curve so documented early-buyer advantage and whale friction engage in realistic contest sizes (audit Finding 11).
+This document captures results from the Forge parameter sweep in [`test/SecondaryPricingTuning.t.sol`](../test/SecondaryPricingTuning.t.sol). The sweep retunes the quadratic bonding curve so documented early-buyer advantage and whale friction engage in realistic contest sizes (audit Finding 11).
 
 ## How to run
 
@@ -10,7 +10,7 @@ This document captures results from the Forge parameter sweep in [`test/Secondar
 forge test --match-path test/SecondaryPricingTuning.t.sol -vv
 ```
 
-Requires maximum permissions in automated environments (see [`agents.md`](agents.md)).
+Requires maximum permissions in automated environments (see [`agents.md`](../agents.md)).
 
 ## Formula (parameterized)
 
@@ -30,11 +30,11 @@ Mint path matches production: binary search + Simpson integration of the spot cu
 
 ## Contest assumptions
 
-Aligned with standard settings in [`agents.md`](agents.md) / [`SecondaryPricingBreakeven.md`](SecondaryPricingBreakeven.md):
+Aligned with standard settings in [`agents.md`](../agents.md) / [`SecondaryPricingBreakeven.md`](SecondaryPricingBreakeven.md):
 
 - Payment token: 18 decimals (same as existing sims)
 - `PURCHASE_INCREMENT = $10`
-- Competitive breakeven report uses bootstrap pot **$108.75** (5× `$20` self-bets + 7% primary subsidy)
+- Competitive breakeven report is a **sure-winner stress info metric** (`P(win)=1`): side balance **$108.75** (5× `$20` self-bets + 7% primary subsidy), claimable pot ≈ **$96.08** after loan repay (×0.93) and referral (×0.95). It is **not** product EV under uncertain outcomes.
 
 ## Success thresholds
 
@@ -47,7 +47,7 @@ Aligned with standard settings in [`agents.md`](agents.md) / [`SecondaryPricingB
 | NotTooSteep        | first `$10` from zero                                 | tokens ≥ **7e18**                            |
 | FrontRunCost       | `$5000` into empty entry                              | avg price paid ≥ **1.15×** base              |
 
-Competitive **breakeven purchase #** (two bettors alternating `$10`) is reported but not a hard gate.
+Competitive **breakeven purchase #** (two bettors alternating `$10`, sure-winner stress) is reported but not a hard gate.
 
 ## Baseline (current production)
 
@@ -56,13 +56,13 @@ Competitive **breakeven purchase #** (two bettors alternating `$10`) is reported
 | Metric           | Value        | Pass? |
 | ---------------- | ------------ | ----- |
 | EarlyAdvantage   | ~1.30×       | PASS  |
-| WhalePriceMove   | ~5.04×       | PASS  |
-| PostWhalePenalty | ~19.5% tokens| PASS  |
+| WhalePriceMove   | ~4.39×       | PASS  |
+| PostWhalePenalty | ~22.4% tokens| PASS  |
 | CurveEngaged     | ~1.15× base  | PASS  |
 | NotTooSteep      | ~10.00 tokens| PASS  |
 | FrontRunCost     | avg ≥1.15×   | PASS  |
 | **passCount**    | **6 / 6**    | —     |
-| Breakeven #      | ~9           | (info)|
+| Breakeven #      | ~9           | (info, sure-winner) |
 
 ### Pre-tuning baseline (`coefficient = 1`)
 
@@ -92,33 +92,33 @@ Quadratic term barely engaged under `COEFFICIENT = 1` — audit Finding 11.
 | `shareDivisor` | 1e9        | **1e9** (unchanged) |
 | `coefficient`  | 1          | **15**             |
 
-Applied in [`src/SecondaryPricing.sol`](src/SecondaryPricing.sol) as `COEFFICIENT = 15`.
+Applied in [`src/SecondaryPricing.sol`](../src/SecondaryPricing.sol) as `COEFFICIENT = 15`.
 
 ### Recommended metrics
 
 | Metric           | Value         | Pass? |
 | ---------------- | ------------- | ----- |
 | EarlyAdvantage   | 1.297×        | PASS  |
-| WhalePriceMove   | 5.040×        | PASS  |
-| PostWhalePenalty | 19.5% tokens  | PASS  |
+| WhalePriceMove   | 4.388×        | PASS  |
+| PostWhalePenalty | 22.4% tokens  | PASS  |
 | CurveEngaged     | 1.150× base   | PASS  |
 | NotTooSteep      | ~9.995 tokens | PASS  |
-| FrontRunCost     | ~2.00× avg    | PASS  |
+| FrontRunCost     | ~5.36× avg    | PASS  |
 | **passCount**    | **6 / 6**     | —     |
-| Breakeven #      | 9             | (info)|
+| Breakeven #      | 9             | (info, sure-winner) |
 
 ### Interpretation
 
-- Early `$10` buyers get ~**30%** more tokens than a `$10` buy after `$150` volume (doc early-advantage goal).
-- A `$1000` whale after three `$10` buys moves spot ~**5×**; the next `$10` gets ~**20%** of the tokens of the first buy (whale friction).
+- Early `$10` buyers get ~**30%** more tokens than a `$10` buy after `$150` volume (local early-advantage goal).
+- A `$1000` whale after three `$10` buys moves spot ~**4.4×**; the next `$10` gets ~**22%** of the tokens of the first buy (whale friction).
 - Spot at `100e18` shares is **1.15×** base (curve clearly engaged).
-- Competitive breakeven moves earlier (**purchase 11 → 9**): satisfying doc goals slightly shortens the profitable wagering window. Acceptable tradeoff; revisit if breakeven docs must stay at ~$120.
+- Sure-winner competitive breakeven under fee-aware claimable pot is around **purchase #9**. Real sizing should use `P(win)`-weighted EV (see [`SecondaryPricingBreakeven.md`](SecondaryPricingBreakeven.md)); the curve does not encode win probability.
 
 ### Nearby all-pass (same divisor)
 
 | coefficient | earlyAdv | whaleMove | postWhale | price@100 | breakeven # |
 | ----------- | -------- | --------- | --------- | --------- | ----------- |
-| **15** (rec)| 1.297×  | 5.04×     | 19.5%     | 1.15×     | 9           |
+| **15** (rec)| 1.297×  | 4.39×     | 22.4%     | 1.15×     | 9           |
 | 20          | 1.378×   | 6.32×     | 15.5%     | 1.20×     | 9           |
 | 25          | 1.452×   | 7.56×     | 12.9%     | 1.25×     | 9           |
 | 50          | 1.760×   | 13.4×     | 7.2%      | 1.50×     | 9           |

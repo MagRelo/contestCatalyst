@@ -47,7 +47,8 @@ contract ContestController is ERC1155, ReentrancyGuard {
     uint256 public immutable primaryDepositAmount;
     uint256 public immutable referralNetworkBps;
     uint256 public immutable expiryTimestamp;
-    /// @notice BPS of each primary deposit credited to `secondaryPrimarySubsidyPerEntry` (no ERC1155 mint)
+    /// @notice BPS carved from each primary deposit into `secondaryPrimarySubsidyPerEntry` (no ERC1155 mint).
+    /// @dev At settle, the same BPS of total secondary TVL (backed + subsidy) is credited back to primary.
     uint256 public immutable primaryDepositSecondarySubsidyBps;
     /// @notice Minimum secondary buy size: 1 whole payment-token unit ($1 for USD stables)
     uint256 public immutable minSecondaryPurchaseAmount;
@@ -85,10 +86,11 @@ contract ContestController is ERC1155, ReentrancyGuard {
 
     mapping(uint256 => int256) public netPosition;
     /// @notice Payment token backing this entry's secondary ERC1155 (secondary buy/sell only; sell-backs are pro-rata on this bucket while OPEN/CANCELLED)
-    /// @dev After SETTLE, per-entry backed + subsidy are merged into the winning entry's slot for redemption accounting.
+    /// @dev After SETTLE, residual secondary TVL (after BPS loan-repay to primary) is parked on the winning entry for redemption.
     mapping(uint256 => uint256) public secondaryLiquidityPerEntry;
 
     /// @notice Primary-sourced secondary TVL on this entry (no share backing; not used for OPEN/CANCELLED sell-backs)
+    /// @dev Cleared at settle; BPS of (backed + subsidy) is repaid to primary, remainder merges into winner liquidity.
     mapping(uint256 => uint256) public secondaryPrimarySubsidyPerEntry;
 
     /// @notice Attributed invested principal per token holder per entry (cancellation refunds + UI)
@@ -310,7 +312,9 @@ contract ContestController is ERC1155, ReentrancyGuard {
 
     /// @notice Settles the contest. Primary payouts are position-paired with `payoutBps`.
     /// @dev Trusted `operator` supplies winners and splits — no on-chain outcome verification.
-    /// @param secondaryWinner Entry that receives the merged secondary pool, anchors referral fees,
+    ///      Before fees, credits `primaryDepositSecondarySubsidyBps` of secondary TVL back to primary
+    ///      (loan repay); residual secondary merges onto `secondaryWinner`.
+    /// @param secondaryWinner Entry that receives the residual secondary pool, anchors referral fees,
     ///        and receives zero-supply spill dust. Must be an active member of `winningEntries`
     ///        (independent of array order).
     function settleContest(
@@ -347,7 +351,12 @@ contract ContestController is ERC1155, ReentrancyGuard {
             uint256 eid = entries[j];
             totalSecondary += secondaryLiquidityPerEntry[eid] + secondaryPrimarySubsidyPerEntry[eid];
         }
+        // Loan repay: credit BPS of secondary TVL (backed + subsidy) back to primary before fees.
+        // Primary is made whole when totalSecondary equals gross primary deposits; benefits when larger.
         uint256 totalGross = totalPrimary + totalSecondary;
+        uint256 repay = (totalSecondary * primaryDepositSecondarySubsidyBps) / BPS_DENOMINATOR;
+        totalPrimary += repay;
+        totalSecondary -= repay;
 
         uint256 referralFee;
         uint256 netBps = BPS_DENOMINATOR;

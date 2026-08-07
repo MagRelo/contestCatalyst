@@ -1,24 +1,33 @@
 # Contest Catalyst
 
-On-chain financial plumbing for [Play The Cut](https://github.com/MagRelo/cut) — a sport-agnostic competition platform. The contracts do not encode golf, F1, commodities, or any other domain; they escrow stakes, run a per-entry secondary market, and settle when a trusted operator posts outcomes from off-chain scoring.
+On-chain **contest escrow** plus a **conviction market** on the same entries. Used by [Play The Cut](https://github.com/MagRelo/cut). A trusted `operator` posts outcomes; the chain holds funds and enforces how they move.
 
-## Why this design
+## What it does
 
-Two jobs, one contest instance:
+Two layers, one contest:
 
-1. **Escrow** — Hold primary deposits and secondary liquidity through a strict lifecycle (`OPEN → ACTIVE → LOCKED → SETTLED`, or `CANCELLED`). Funds move only by the rules of the state machine: join/withdraw, buy/sell-back where allowed, then claim (or push) after settlement.
-2. **Verifiable market** — Layer a bonding-curve market on contest entries (non-transferable ERC1155 shares). Prices, supply, and balances are on-chain and auditable; anyone can check what was paid, what is owed, and how settlement split the pools. Real-world winners still come from a trusted `operator` (not an on-chain oracle) — the chain verifies _money movement_, not _who won the event_.
+| Layer         | What it is        | How it works                                                                                                                                           |
+| ------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Primary**   | Tournament Escrow | Users deposit a fixed amount. The operator computes tournament results off-chain, settles the escrow, and disburses the prize pool to named winners.   |
+| **Secondary** | Conviction market | Users purchase shares in the outcome of the tournament. At settle, the total secondary-market TVL is distributed to share owners of the winning entry. |
 
-Sport-agnostic by construction: the product (scoring, lineups, consensus, ops) lives off-chain in Cut; this repo is the shared cashflow and market substrate every competition plugs into.
+**Pricing is local** (each entry’s own curve). **Redemption is global** (one merged pot for the winner). Size secondary as conviction — early/thin is cheaper on the curve; the curve does not discover win probability. Detail: [SecondaryPricingBreakeven.md](docs/SecondaryPricingBreakeven.md), [SecondaryPricingSimulation.md](docs/SecondaryPricingSimulation.md).
 
-### Primary + secondary on one contest
+## Lifecycle
 
-- **Primary (tournament stake):** each entrant posts a fixed `primaryDepositAmount`. Most of it funds the Layer-1 prize pool; a BPS carve (`primaryDepositSecondarySubsidyBps`) seeds that entry’s secondary side as unbacked subsidy. After settle, named winners split the primary pool by `payoutBps`.
-- **Secondary (prediction market on those entries):** while `ACTIVE`, anyone can buy variable amounts on any entry. Each buy is priced on that entry’s own quadratic bonding curve (`price = BASE_PRICE + COEFFICIENT * shares²`), mints non-transferable ERC1155 shares to the buyer, and credits the payment to that entry’s backed `secondaryLiquidityPerEntry`. Sell-backs (OPEN/CANCELLED only) pay from that entry’s backed liquidity alone — subsidy is not withdrawable mid-contest.
+```
+OPEN → ACTIVE → LOCKED → SETTLED
+  ↓      ↓        ↓
+CANCELLED
+```
 
-**Settlement merge (intentional winner-take-all):** at `settleContest`, every entry’s backed liquidity plus primary subsidy is swept into one pool on `secondaryWinner`. Holders of that entry’s ERC1155 redeem pro-rata against the **contest-wide** secondary TVL — not against only what was bought on the winner. If the winning entry has liquidity but zero share supply, the merged secondary pool spills into primary payouts instead.
-
-That split is the product shape: primary is “enter the field”; secondary is “price conviction across the field,” with early/thin entries cheaper on the curve and the aggregate secondary pot paid to whoever held the eventual winner. Pricing is local (per-entry supply); redemption is global (merged pot). Participants should size secondary buys knowing losing-entry capital funds the winning entry’s claimants.
+| State         | Primary Layer         | Secondary Layer                       |
+| ------------- | --------------------- | ------------------------------------- |
+| **OPEN**      | Join / withdraw       | Closed                                |
+| **ACTIVE**    | Locked                | Buys open                             |
+| **LOCKED**    | Locked                | Closed; operator may settle           |
+| **SETTLED**   | Claim primary payouts | Winning-entry holders claim secondary |
+| **CANCELLED** | Refund deposits       | Sell-back / refund positions          |
 
 ## Contract Structure
 
@@ -43,22 +52,11 @@ That split is the product shape: primary is “enter the field”; secondary is 
 
 This role is distinct from ReferralGraph’s per-group **authorized oracle** (referral-tree registration only).
 
-## State Machine
+## State Machine (ops notes)
 
-```
-OPEN → ACTIVE → LOCKED → SETTLED
-  ↓      ↓        ↓
-CANCELLED ←───────┘
-```
+Lifecycle summary is above. Extra rules:
 
-- **OPEN**: Primary participants join/withdraw. Secondary market is **closed**.
-- **ACTIVE**: Primary locked. Secondary buys open (non-transferable ERC1155 accounting shares).
-- **LOCKED**: Secondary closed. Operator may settle.
-- **SETTLED**: Results in; users claim primary/secondary payouts.
-- **CANCELLED**: Refunds via remove primary/secondary.
-- **CLOSED**: Enum sentinel only; unreachable on-chain.
-
-**Operational / expiry notes:**
+- **CLOSED**: enum sentinel only; unreachable on-chain.
 
 - After `expiryTimestamp`, the operator has an exclusive `SETTLEMENT_GRACE_PERIOD` (1 day) to `settleContest` while LOCKED. Permissionless `cancelExpired()` only unlocks after `expiryTimestamp + SETTLEMENT_GRACE_PERIOD` (lost-operator / abandoned-contest escape hatch).
 - After push batches, any **unallocated** balance (integer-division residuals / donations with no claimable owner) is credited into the secondary winning pool, or else the first still-owed primary payout — never transferred to the operator.
@@ -160,7 +158,7 @@ address contest = factory.createContest(
     contestantDepositAmount,           // Fixed deposit for primary participants
     referralNetworkBps,                // Referral network fee in basis points at settlement (max 1000 = 10%)
     expiry,                            // Expiration timestamp
-    primaryDepositSecondarySubsidyBps  // e.g. 700 = 7%; BPS of each primary deposit to secondary subsidy (unbacked)
+    primaryDepositSecondarySubsidyBps  // e.g. 700 = 7%; deposit carve + settle loan-repay rate
 );
 ```
 
@@ -169,7 +167,7 @@ address contest = factory.createContest(
 - `paymentToken` / `operator` / `referralGraph` / `rewardCalculator` / `referralGroupId`: factory-level immutables set at factory deploy; every contest from that factory inherits them
 - `operator`: trusted escrow/ops agent (not an on-chain truth oracle); use a multisig in production
 - `referralNetworkBps`: 500 = 5% fee at settlement (standard in tests)
-- `primaryDepositSecondarySubsidyBps`: 700 = 7% (matches test and doc baselines in this repo)
+- `primaryDepositSecondarySubsidyBps`: 700 = 7% deposit carve and settle repay rate (matches test/doc baselines)
 - `expiry`: after this timestamp, operator has `SETTLEMENT_GRACE_PERIOD` (1 day) exclusive settle window before permissionless `cancelExpired`
 
 ## Testing Guide
@@ -211,7 +209,10 @@ forge snapshot
 ### Key Test Files
 
 - **[ContestController.t.sol](test/ContestController.t.sol)**: Main integration tests covering both layers
-- **[SecondaryPricing.t.sol](test/SecondaryPricing.t.sol)**: Bonding curve pricing tests
+- **[SecondaryPricing.t.sol](test/SecondaryPricing.t.sol)**: Bonding curve unit tests
+- **[SecondaryPricingSimulation.t.sol](test/SecondaryPricingSimulation.t.sol)**: Local mint-path curve smell tests (see docs)
+- **[SecondaryPricingBreakeven.t.sol](test/SecondaryPricingBreakeven.t.sol)**: Settlement / claim-EV sims (sure-winner stress, `P(win)`, loser-float)
+- **[SecondaryPricingTuning.t.sol](test/SecondaryPricingTuning.t.sol)**: Curve parameter sweep (Finding 11 gates)
 - **[PrimaryContest.t.sol](test/PrimaryContest.t.sol)**: Primary mechanics tests
 - **[SecondaryContest.t.sol](test/SecondaryContest.t.sol)**: Secondary mechanics tests
 
