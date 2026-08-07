@@ -3174,6 +3174,58 @@ contract ContestControllerTest is ReferralTestHarness {
         assertEq(c.primaryPrizePoolPayouts(ENTRY_1), expectedPrimaryPayout);
     }
 
+    function test_settleContest_UnderpayCalculatorRestoresShortfall() public {
+        UnderpayRewardCalculator underpay = new UnderpayRewardCalculator();
+        address contestAddress = factory.createContest(
+            address(paymentToken),
+            operator,
+            PRIMARY_DEPOSIT,
+            REFERRAL_NETWORK_BPS,
+            block.timestamp + EXPIRY_OFFSET,
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
+            address(referralGraph),
+            address(underpay),
+            REFERRAL_GROUP_ID
+        );
+        ContestController c = ContestController(contestAddress);
+
+        address referrer = address(0xB0B);
+        _registerWinnerReferrer(user1, referrer);
+
+        _fundUserContest(user1, c, PRIMARY_DEPOSIT);
+        vm.prank(user1);
+        c.addPrimaryPosition(ENTRY_1, new bytes32[](0));
+        vm.prank(operator);
+        c.activateContest();
+        _fundUserContest(user2, c, PURCHASE_INCREMENT);
+        vm.prank(user2);
+        c.addSecondaryPosition(ENTRY_1, PURCHASE_INCREMENT, new bytes32[](0));
+        vm.prank(operator);
+        c.lockContest();
+
+        uint256 referralFee = _referralFeeAmount(c);
+        uint256 paid = referralFee / 2; // UnderpayRewardCalculator pays half to amounts[0]
+        uint256 shortfall = referralFee - paid;
+        uint256 referrerBefore = paymentToken.balanceOf(referrer);
+        uint256 totalPrimary = c.primaryPrizePool();
+        uint256 totalSecondary = c.getSecondarySideBalance();
+        (uint256 toPrimary, uint256 toSecondary) =
+            _referralFeeRestoreShares(shortfall, totalPrimary, totalSecondary);
+        uint256 expectedPrimaryPayout = (totalPrimary * _netBps(c)) / 10_000 + toPrimary;
+        uint256 expectedSecondary = (totalSecondary * _netBps(c)) / 10_000 + toSecondary;
+
+        uint256[] memory winners = new uint256[](1);
+        winners[0] = ENTRY_1;
+        uint256[] memory payouts = new uint256[](1);
+        payouts[0] = 10_000;
+        _settleContest(c, winners, payouts);
+
+        assertEq(uint8(c.state()), uint8(ContestState.SETTLED));
+        assertEq(paymentToken.balanceOf(referrer), referrerBefore + paid);
+        assertEq(c.primaryPrizePoolPayouts(ENTRY_1), expectedPrimaryPayout);
+        assertEq(c.secondaryLiquidityPerEntry(ENTRY_1), expectedSecondary);
+    }
+
     function test_addPrimaryPosition_MaxEntriesReached() public {
         // Fill almost to cap using a fresh zero-deposit contest to keep funding cheap
         address contestAddress = factory.createContest(
@@ -3207,6 +3259,20 @@ contract MaliciousOverpayCalculator {
     function calculateRewards(uint256, uint256 numRecipients) external pure returns (uint256[] memory amounts) {
         amounts = new uint256[](numRecipients == 0 ? 1 : numRecipients);
         amounts[0] = type(uint128).max;
+    }
+}
+
+/// @dev Allocates only half the fee so sum < referralFee; shortfall must restore to prize pools
+contract UnderpayRewardCalculator {
+    function calculateRewards(uint256 referralFee, uint256 numRecipients)
+        external
+        pure
+        returns (uint256[] memory amounts)
+    {
+        amounts = new uint256[](numRecipients);
+        if (numRecipients > 0) {
+            amounts[0] = referralFee / 2;
+        }
     }
 }
 

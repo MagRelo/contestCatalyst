@@ -429,7 +429,8 @@ contract ContestController is ERC1155, ReentrancyGuard {
     }
 
     /// @notice Referral fee distribution (self-call target for try/catch in `settleContest`)
-    /// @return undistributed Fee restored proportionally to primary and secondary pools when there is no payable referrer
+    /// @return undistributed Fee restored proportionally to primary and secondary pools when there is no payable
+    /// referrer, or when the reward calculator under-allocates (`sum < referralFee`)
     function distributeReferralFee(address winner, uint256 referralFee) external returns (uint256 undistributed) {
         require(msg.sender == address(this), "Only self");
 
@@ -462,6 +463,8 @@ contract ContestController is ERC1155, ReentrancyGuard {
             sum += amounts[i];
         }
         require(sum <= referralFee, "Rewards exceed fee");
+        // Calculator may under-allocate; restore the shortfall to both prize pools.
+        undistributed = referralFee - sum;
 
         for (uint256 i = 0; i < chain.length; i++) {
             if (amounts[i] > 0) {
