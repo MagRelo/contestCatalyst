@@ -906,8 +906,37 @@ contract ContestControllerTest is ReferralTestHarness {
         _fundUser(user2, PURCHASE_INCREMENT);
         
         vm.prank(user2);
-        vm.expectRevert("Amount must be > 0");
+        vm.expectRevert("Buy below minimum");
         contest.addSecondaryPosition(ENTRY_1, 0, new bytes32[](0));
+    }
+
+    function test_addSecondaryPosition_BelowMinimum() public {
+        _createPrimaryEntry(user1, ENTRY_1);
+        vm.prank(oracle);
+        contest.activateContest();
+
+        uint256 dust = 1;
+        _fundUser(user2, dust);
+
+        vm.prank(user2);
+        vm.expectRevert("Buy below minimum");
+        contest.addSecondaryPosition(ENTRY_1, dust, new bytes32[](0));
+    }
+
+    function test_addSecondaryPosition_ExactMinimum() public {
+        _createPrimaryEntry(user1, ENTRY_1);
+        vm.prank(oracle);
+        contest.activateContest();
+
+        uint256 minBuy = contest.minSecondaryPurchaseAmount();
+        assertEq(minBuy, 1e18);
+
+        _fundUser(user2, minBuy);
+        vm.prank(user2);
+        contest.addSecondaryPosition(ENTRY_1, minBuy, new bytes32[](0));
+
+        assertGt(contest.balanceOf(user2, ENTRY_1), 0);
+        assertEq(contest.secondaryLiquidityPerEntry(ENTRY_1), minBuy);
     }
     
     function test_addSecondaryPosition_InvalidMerkleProof() public {
@@ -935,22 +964,23 @@ contract ContestControllerTest is ReferralTestHarness {
     }
     
     function test_addSecondaryPosition_PaymentTooSmall() public {
+        // Dust buys are rejected by the $1 minimum before curve mint sizing runs.
+        // Zero-token mint protection for payments that clear the floor is covered in
+        // SecondaryPricing unit tests (very small payment at high supply).
         _createPrimaryEntry(user1, ENTRY_1);
         vm.prank(oracle);
         contest.activateContest();
-        
-        // Add large position first to drive up price
+
         _fundUser(user2, PURCHASE_INCREMENT * 100);
         vm.prank(user2);
         contest.addSecondaryPosition(ENTRY_1, PURCHASE_INCREMENT * 100, new bytes32[](0));
-        
-        // Very small payment that might not get tokens
-        uint256 smallPayment = 1; // 1 wei
-        _fundUser(user3, smallPayment);
-        
+
+        uint256 belowMin = contest.minSecondaryPurchaseAmount() - 1;
+        _fundUser(user3, belowMin);
+
         vm.prank(user3);
-        vm.expectRevert("Payment too small: insufficient to purchase tokens");
-        contest.addSecondaryPosition(ENTRY_1, smallPayment, new bytes32[](0));
+        vm.expectRevert("Buy below minimum");
+        contest.addSecondaryPosition(ENTRY_1, belowMin, new bytes32[](0));
     }
     
     function test_addSecondaryPosition_TokensReceived() public {
@@ -979,6 +1009,7 @@ contract ContestControllerTest is ReferralTestHarness {
             PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
         );
         assertEq(usdcContest.paymentTokenDecimals(), 6);
+        assertEq(usdcContest.minSecondaryPurchaseAmount(), 1e6);
 
         usdc.mint(user1, primaryDeposit6);
         vm.startPrank(user1);
@@ -1015,6 +1046,47 @@ contract ContestControllerTest is ReferralTestHarness {
 
         // Spot price after equal face-value buys should match
         assertEq(usdcContest.calculateSecondaryPrice(ENTRY_1), contest.calculateSecondaryPrice(ENTRY_2));
+    }
+
+    function test_addSecondaryPosition_SixDecimal_ExactMinimum() public {
+        MockERC20 usdc = new MockERC20("USD Coin", "USDC", 6);
+        uint256 primaryDeposit6 = 25e6;
+        uint256 minBuy6 = 1e6; // $1
+
+        ContestController usdcContest = _createContest(
+            address(usdc),
+            oracle,
+            primaryDeposit6,
+            REFERRAL_NETWORK_BPS,
+            block.timestamp + EXPIRY_OFFSET,
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
+        );
+        assertEq(usdcContest.minSecondaryPurchaseAmount(), minBuy6);
+
+        usdc.mint(user1, primaryDeposit6);
+        vm.startPrank(user1);
+        usdc.approve(address(usdcContest), primaryDeposit6);
+        usdcContest.addPrimaryPosition(ENTRY_1, new bytes32[](0));
+        vm.stopPrank();
+
+        vm.prank(oracle);
+        usdcContest.activateContest();
+
+        usdc.mint(user2, minBuy6 - 1);
+        vm.startPrank(user2);
+        usdc.approve(address(usdcContest), minBuy6 - 1);
+        vm.expectRevert("Buy below minimum");
+        usdcContest.addSecondaryPosition(ENTRY_1, minBuy6 - 1, new bytes32[](0));
+        vm.stopPrank();
+
+        usdc.mint(user2, minBuy6);
+        vm.startPrank(user2);
+        usdc.approve(address(usdcContest), minBuy6);
+        usdcContest.addSecondaryPosition(ENTRY_1, minBuy6, new bytes32[](0));
+        vm.stopPrank();
+
+        assertGt(usdcContest.balanceOf(user2, ENTRY_1), 0);
+        assertEq(usdcContest.secondaryLiquidityPerEntry(ENTRY_1), minBuy6);
     }
     
     function test_addSecondaryPosition_PriceIncreases() public {
@@ -2548,18 +2620,29 @@ contract ContestControllerTest is ReferralTestHarness {
     }
     
     function test_UX_PaymentTooSmall_Protection() public {
+        // With a $1 minimum buy, dust payments revert before the curve can return 0 tokens.
         _createPrimaryEntry(user1, ENTRY_1);
-        
-        // Add large position first to drive up price
         _createSecondaryPosition(user2, ENTRY_1, PURCHASE_INCREMENT * 100);
-        
-        // Very small payment that won't get tokens
-        uint256 smallPayment = 1;
-        _fundUser(user3, smallPayment);
-        
+
+        uint256 belowMin = contest.minSecondaryPurchaseAmount() - 1;
+        _fundUser(user3, belowMin);
+
         vm.prank(user3);
-        vm.expectRevert("Payment too small: insufficient to purchase tokens");
-        contest.addSecondaryPosition(ENTRY_1, smallPayment, new bytes32[](0));
+        vm.expectRevert("Buy below minimum");
+        contest.addSecondaryPosition(ENTRY_1, belowMin, new bytes32[](0));
+    }
+
+    function test_UX_BuyBelowMinimum_DustRejected() public {
+        _createPrimaryEntry(user1, ENTRY_1);
+        vm.prank(oracle);
+        contest.activateContest();
+
+        uint256 dust = 1;
+        _fundUser(user3, dust);
+
+        vm.prank(user3);
+        vm.expectRevert("Buy below minimum");
+        contest.addSecondaryPosition(ENTRY_1, dust, new bytes32[](0));
     }
     
     function test_UX_CompleteClaim() public {

@@ -16,6 +16,7 @@ contract TestStorage {
     bool public secondaryMarketResolved;
     uint256 public secondaryWinningEntry;
     uint256 public expiryTimestamp = type(uint256).max;
+    uint256 public constant MIN_PURCHASE = 1e18;
 
     // Setter functions for test setup
     function setEntryOwner(uint256 entryId, address owner) external {
@@ -56,7 +57,9 @@ contract TestStorage {
         uint256 amount,
         uint8 state
     ) external view {
-        SecondaryContest.validateAddSecondaryPosition(entryOwner, entryId, amount, expiryTimestamp, state);
+        SecondaryContest.validateAddSecondaryPosition(
+            entryOwner, entryId, amount, expiryTimestamp, state, MIN_PURCHASE
+        );
     }
 
     function validateRemoveSecondaryPosition(
@@ -147,6 +150,7 @@ contract SecondaryContestTest is Test {
     uint256 public constant AMOUNT_2 = 200e18;
     uint256 public constant TOKENS_1 = 50e18;
     uint256 public constant TOKENS_2 = 100e18;
+    uint256 public constant MIN_PURCHASE = 1e18;
 
     function setUp() public {
         testStorage = new TestStorage();
@@ -456,12 +460,22 @@ contract SecondaryContestTest is Test {
         testStorage.validateAddSecondaryPosition(ENTRY_1, AMOUNT_1, uint8(ContestState.ACTIVE));
     }
 
-    function test_validateAddSecondaryPosition_Invalid_ZeroAmount() public {
+    function test_validateAddSecondaryPosition_Invalid_BelowMinimum() public {
         _setState(ContestState.ACTIVE);
         _createEntry(ENTRY_1, entryOwner1);
         
-        vm.expectRevert("Amount must be > 0");
+        vm.expectRevert("Buy below minimum");
         testStorage.validateAddSecondaryPosition(ENTRY_1, 0, uint8(ContestState.ACTIVE));
+
+        vm.expectRevert("Buy below minimum");
+        testStorage.validateAddSecondaryPosition(ENTRY_1, MIN_PURCHASE - 1, uint8(ContestState.ACTIVE));
+    }
+
+    function test_validateAddSecondaryPosition_Valid_ExactMinimum() public {
+        _setState(ContestState.ACTIVE);
+        _createEntry(ENTRY_1, entryOwner1);
+
+        testStorage.validateAddSecondaryPosition(ENTRY_1, MIN_PURCHASE, uint8(ContestState.ACTIVE));
     }
 
     function test_validateAddSecondaryPosition_Invalid_Expired() public {
@@ -477,7 +491,7 @@ contract SecondaryContestTest is Test {
         uint256 entryId,
         uint256 amount
     ) public {
-        amount = bound(amount, 1, type(uint256).max);
+        amount = bound(amount, MIN_PURCHASE, type(uint256).max);
         entryId = bound(entryId, 1, 1000);
         
         _createEntry(entryId, entryOwner1);
@@ -490,7 +504,7 @@ contract SecondaryContestTest is Test {
         uint256 entryId,
         uint256 amount
     ) public {
-        amount = bound(amount, 1, type(uint256).max);
+        amount = bound(amount, MIN_PURCHASE, type(uint256).max);
         entryId = bound(entryId, 1, 1000);
         
         _createEntry(entryId, entryOwner1);

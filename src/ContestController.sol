@@ -39,6 +39,8 @@ contract ContestController is ERC1155, ReentrancyGuard {
     uint256 public immutable expiryTimestamp;
     /// @notice BPS of each primary deposit credited to `secondaryPrimarySubsidyPerEntry` (no ERC1155 mint)
     uint256 public immutable primaryDepositSecondarySubsidyBps;
+    /// @notice Minimum secondary buy size: 1 whole payment-token unit ($1 for USD stables)
+    uint256 public immutable minSecondaryPurchaseAmount;
     address public immutable referralGraph;
     address public immutable rewardCalculator;
     bytes32 public immutable referralGroupId;
@@ -149,6 +151,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
 
         paymentToken = _paymentToken;
         paymentTokenDecimals = ERC20(_paymentToken).decimals();
+        minSecondaryPurchaseAmount = 10 ** uint256(paymentTokenDecimals);
         oracle = _oracle;
         emergencyRecovery = _emergencyRecovery;
         primaryDepositAmount = _primaryDepositAmount;
@@ -217,7 +220,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
     {
         SecondaryContest.validateSecondaryMerkleProof(secondaryMerkleRoot, msg.sender, merkleProof);
         SecondaryContest.validateAddSecondaryPosition(
-            entryOwner, entryId, amount, expiryTimestamp, uint8(state)
+            entryOwner, entryId, amount, expiryTimestamp, uint8(state), minSecondaryPurchaseAmount
         );
 
         int256 netPos = netPosition[entryId];

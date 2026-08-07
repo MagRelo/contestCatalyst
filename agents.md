@@ -44,6 +44,7 @@ The standard initial contract settings are defined in:
    - `PRIMARY_DEPOSIT = 25e18` ($25)
    - `referralNetworkBps = 500` (5% referral network fee at settlement)
    - `PURCHASE_INCREMENT = 10e18` ($10)
+   - `minSecondaryPurchaseAmount = 10 ** paymentTokenDecimals` ($1 whole-token unit; dust buys revert)
    - `primaryDepositSecondarySubsidyBps = 700` (7% of each primary deposit credits `secondaryPrimarySubsidyPerEntry[entryId]`; the remainder credits `primaryPrizePool`)
    - Secondary purchases mint ERC1155 to the caller; each payment is priced along the curve from the entry's current supply.
    - Primary subsidy is unbacked (sell-backs use backed liquidity only). At settlement, backed and subsidy merge on the winning entry for pro-rata redemption (or spill to primary payouts if there is no winning secondary supply).
@@ -52,6 +53,7 @@ The standard initial contract settings are defined in:
    - `PRIMARY_DEPOSIT`: $25
    - `referralNetworkBps`: 500 (5%)
    - `primaryDepositSecondarySubsidyBps`: 700 (7%)
+   - `minSecondaryPurchaseAmount`: $1 (`10 ** decimals`)
    - `COEFFICIENT`: 15
    - `BASE_PRICE`: 1e6
    - `PRICE_PRECISION`: 1e6

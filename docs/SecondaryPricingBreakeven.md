@@ -9,6 +9,7 @@ This analysis uses the following contest settings:
 | `PRIMARY_DEPOSIT`                  | $25   | Fixed amount each primary participant must deposit                            |
 | `referralNetworkBps`               | 500   | Referral network fee: 5% of gross distributable TVL at settlement (500 basis points) |
 | `primaryDepositSecondarySubsidyBps`| 700   | 7% of each primary deposit credits `secondaryPrimarySubsidyPerEntry` (unbacked) |
+| `minSecondaryPurchaseAmount`       | $1    | Minimum secondary buy: `10 ** paymentTokenDecimals` (rejects dust)            |
 | `COEFFICIENT`                      | 15    | Quadratic bonding curve coefficient                                           |
 | `BASE_PRICE`                       | 1e6   | Minimum price: 1.0 (scaled by PRICE_PRECISION)                                  |
 | `PRICE_PRECISION`                  | 1e6   | Price precision: 1.0 = 1,000,000                                              |
