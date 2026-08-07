@@ -54,13 +54,13 @@ contract ContestControllerTest is ReferralTestHarness {
     MockERC20 public paymentToken;
     
     // Test addresses
-    address public oracle = address(0x1);
+    address public operator = address(0x1);
     address public user1 = address(0x10);
     address public user2 = address(0x20);
     address public user3 = address(0x30);
     address public user4 = address(0x40);
     address public user5 = address(0x50);
-    address public nonOracle = address(0x99);
+    address public nonOperator = address(0x99);
     
     // Test entry IDs
     uint256 public constant ENTRY_1 = 1;
@@ -76,7 +76,7 @@ contract ContestControllerTest is ReferralTestHarness {
         _initReferralInfra();
         contest = _createContest(
             address(paymentToken),
-            oracle,
+            operator,
             PRIMARY_DEPOSIT,
             REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
@@ -89,8 +89,8 @@ contract ContestControllerTest is ReferralTestHarness {
         paymentToken.mint(user3, 100000e18);
         paymentToken.mint(user4, 100000e18);
         paymentToken.mint(user5, 100000e18);
-        paymentToken.mint(oracle, 100000e18);
-        paymentToken.mint(nonOracle, 100000e18);
+        paymentToken.mint (operator, 100000e18);
+        paymentToken.mint(nonOperator, 100000e18);
     }
     
     // ============ Helper Functions ============
@@ -98,10 +98,10 @@ contract ContestControllerTest is ReferralTestHarness {
     /**
      * @notice Deploy a new contest with standard settings
      */
-    function _deployContest(address _oracle, uint256 _expiryOffset) internal returns (ContestController) {
+    function _deployContest(address _operator, uint256 _expiryOffset) internal returns (ContestController) {
         return _createContest(
             address(paymentToken),
-            _oracle,
+            _operator,
             PRIMARY_DEPOSIT,
             REFERRAL_NETWORK_BPS,
             block.timestamp + _expiryOffset,
@@ -112,7 +112,7 @@ contract ContestControllerTest is ReferralTestHarness {
     function _deployContestSubsidy(uint256 subsidyBps) internal returns (ContestController) {
         return _createContest(
             address(paymentToken),
-            oracle,
+            operator,
             PRIMARY_DEPOSIT,
             REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
@@ -249,17 +249,17 @@ contract ContestControllerTest is ReferralTestHarness {
     }
     
     /**
-     * @notice Calculate expected oracle fee
+     * @notice Calculate expected referral network fee
      */
     function _calculateExpectedReferralFee(uint256 totalGross) internal pure returns (uint256) {
         return (totalGross * REFERRAL_NETWORK_BPS) / 10000;
     }
     
     /**
-     * @notice Set contest state (via oracle)
+     * @notice Set contest state (via operator)
      */
     function _setState(ContestState state) internal {
-        vm.prank(oracle);
+        vm.prank(operator);
         if (state == ContestState.ACTIVE) {
             contest.activateContest();
         } else if (state == ContestState.LOCKED) {
@@ -282,10 +282,10 @@ contract ContestControllerTest is ReferralTestHarness {
     // ============ Constructor Tests ============
     
     function test_constructor_ValidParameters() public {
-        ContestController newContest = _deployContest(oracle, EXPIRY_OFFSET);
+        ContestController newContest = _deployContest(operator, EXPIRY_OFFSET);
         
         assertEq(address(newContest.paymentToken()), address(paymentToken));
-        assertEq(newContest.oracle(), oracle);
+        assertEq(newContest.operator(), operator);
         assertEq(newContest.primaryDepositAmount(), PRIMARY_DEPOSIT);
         assertEq(newContest.referralNetworkBps(), REFERRAL_NETWORK_BPS);
         assertEq(newContest.primaryDepositSecondarySubsidyBps(), PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS);
@@ -297,7 +297,7 @@ contract ContestControllerTest is ReferralTestHarness {
         vm.expectRevert("Invalid payment token");
         factory.createContest(
             address(0),
-            oracle,
+            operator,
             PRIMARY_DEPOSIT,
             REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
@@ -308,8 +308,8 @@ contract ContestControllerTest is ReferralTestHarness {
         );
     }
     
-    function test_constructor_InvalidOracle() public {
-        vm.expectRevert("Invalid oracle");
+    function test_constructor_InvalidOperator() public {
+        vm.expectRevert("Invalid operator");
         factory.createContest(
             address(paymentToken),
             address(0),
@@ -326,7 +326,7 @@ contract ContestControllerTest is ReferralTestHarness {
     function test_constructor_ZeroDepositAmount_Succeeds() public {
         address contestAddress = factory.createContest(
             address(paymentToken),
-            oracle,
+            operator,
             0,
             REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
@@ -344,7 +344,7 @@ contract ContestControllerTest is ReferralTestHarness {
     function test_zeroDepositContest_primaryAndSecondaryFlow() public {
         address contestAddress = factory.createContest(
             address(paymentToken),
-            oracle,
+            operator,
             0,
             REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
@@ -362,7 +362,7 @@ contract ContestControllerTest is ReferralTestHarness {
         freeContest.addPrimaryPosition(ENTRY_1, new bytes32[](0));
         assertEq(freeContest.primaryPrizePool(), 0);
 
-        vm.prank(oracle);
+        vm.prank(operator);
         freeContest.activateContest();
 
         vm.prank(user1);
@@ -370,11 +370,11 @@ contract ContestControllerTest is ReferralTestHarness {
         assertEq(freeContest.secondaryLiquidityPerEntry(ENTRY_1), PURCHASE_INCREMENT);
     }
     
-    function test_constructor_OracleFeeTooHigh() public {
+    function test_constructor_ReferralFeeTooHigh() public {
         vm.expectRevert("Referral network fee too high");
         factory.createContest(
             address(paymentToken),
-            oracle,
+            operator,
             PRIMARY_DEPOSIT,
             1001, // > 10%
             block.timestamp + EXPIRY_OFFSET,
@@ -389,7 +389,7 @@ contract ContestControllerTest is ReferralTestHarness {
         vm.expectRevert("Expiry in past");
         factory.createContest(
             address(paymentToken),
-            oracle,
+            operator,
             PRIMARY_DEPOSIT,
             REFERRAL_NETWORK_BPS,
             block.timestamp - 1,
@@ -404,7 +404,7 @@ contract ContestControllerTest is ReferralTestHarness {
         vm.expectRevert("Subsidy bps too high");
         factory.createContest(
             address(paymentToken),
-            oracle,
+            operator,
             PRIMARY_DEPOSIT,
             REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
@@ -455,13 +455,13 @@ contract ContestControllerTest is ReferralTestHarness {
         c.addPrimaryPosition(ENTRY_1, new bytes32[](0));
 
         _fundUserContest(user2, c, PURCHASE_INCREMENT);
-        vm.prank(oracle);
+        vm.prank(operator);
         c.activateContest();
         vm.prank(user2);
         c.addSecondaryPosition(ENTRY_1, PURCHASE_INCREMENT, new bytes32[](0));
         uint256 bal = c.balanceOf(user2, ENTRY_1);
 
-        vm.prank(oracle);
+        vm.prank(operator);
         c.cancelContest();
         vm.prank(user2);
         c.removeSecondaryPosition(ENTRY_1, bal);
@@ -477,12 +477,12 @@ contract ContestControllerTest is ReferralTestHarness {
         c.addPrimaryPosition(ENTRY_1, new bytes32[](0));
 
         _fundUserContest(user2, c, PURCHASE_INCREMENT);
-        vm.prank(oracle);
+        vm.prank(operator);
         c.activateContest();
         vm.prank(user2);
         c.addSecondaryPosition(ENTRY_1, PURCHASE_INCREMENT, new bytes32[](0));
 
-        vm.prank(oracle);
+        vm.prank(operator);
         c.lockContest();
 
         uint256[] memory winners = new uint256[](1);
@@ -527,7 +527,7 @@ contract ContestControllerTest is ReferralTestHarness {
         
         (bytes32 root, bytes32[][] memory proofs) = _generateMerkleTree(addresses);
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.setPrimaryMerkleRoot(root);
         
         _fundUser(user1, PRIMARY_DEPOSIT);
@@ -542,7 +542,7 @@ contract ContestControllerTest is ReferralTestHarness {
         _fundUser(user1, PRIMARY_DEPOSIT);
         _createPrimaryEntry(user1, ENTRY_1);
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
         
         _fundUser(user2, PRIMARY_DEPOSIT);
@@ -562,7 +562,7 @@ contract ContestControllerTest is ReferralTestHarness {
     }
     
     function test_addPrimaryPosition_ContestExpired() public {
-        ContestController expiredContest = _deployContest(oracle, 1 days);
+        ContestController expiredContest = _deployContest(operator, 1 days);
         vm.warp(block.timestamp + 1 days + 1);
         
         MockERC20(paymentToken).mint(user1, PRIMARY_DEPOSIT);
@@ -581,7 +581,7 @@ contract ContestControllerTest is ReferralTestHarness {
         
         (bytes32 root, ) = _generateMerkleTree(addresses);
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.setPrimaryMerkleRoot(root);
         
         _fundUser(user3, PRIMARY_DEPOSIT);
@@ -631,7 +631,7 @@ contract ContestControllerTest is ReferralTestHarness {
     
     function test_removePrimaryPosition_SuccessInCancelledState() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.cancelContest();
         
         uint256 balanceBefore = paymentToken.balanceOf(user1);
@@ -645,7 +645,7 @@ contract ContestControllerTest is ReferralTestHarness {
     
     function test_removePrimaryPosition_WrongState() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
         
         vm.prank(user1);
@@ -683,10 +683,10 @@ contract ContestControllerTest is ReferralTestHarness {
         _createPrimaryEntry(user1, ENTRY_1);
         _createPrimaryEntry(user2, ENTRY_2);
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
         
         uint256[] memory winners = new uint256[](2);
@@ -715,7 +715,7 @@ contract ContestControllerTest is ReferralTestHarness {
 
         _createSecondaryPosition(user3, ENTRY_1, PURCHASE_INCREMENT * 10);
 
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
 
         uint256[] memory winners = new uint256[](2);
@@ -747,10 +747,10 @@ contract ContestControllerTest is ReferralTestHarness {
         _createPrimaryEntry(user1, ENTRY_1);
         _createPrimaryEntry(user2, ENTRY_2);
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
         
         uint256[] memory winners = new uint256[](1);
@@ -768,10 +768,10 @@ contract ContestControllerTest is ReferralTestHarness {
         _createPrimaryEntry(user1, ENTRY_1);
         _createPrimaryEntry(user2, ENTRY_2);
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
         
         uint256[] memory winners = new uint256[](1);
@@ -800,7 +800,7 @@ contract ContestControllerTest is ReferralTestHarness {
     
     function test_addSecondaryPosition_SuccessInActiveState() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
         
         _fundUser(user2, PURCHASE_INCREMENT);
@@ -813,7 +813,7 @@ contract ContestControllerTest is ReferralTestHarness {
     
     function test_addSecondaryPosition_MerkleRootGating() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
         
         address[] memory addresses = new address[](2);
@@ -822,7 +822,7 @@ contract ContestControllerTest is ReferralTestHarness {
         
         (bytes32 root, bytes32[][] memory proofs) = _generateMerkleTree(addresses);
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.setSecondaryMerkleRoot(root);
         
         _fundUser(user2, PURCHASE_INCREMENT);
@@ -835,9 +835,9 @@ contract ContestControllerTest is ReferralTestHarness {
     
     function test_addSecondaryPosition_WrongState() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
         
         _fundUser(user2, PURCHASE_INCREMENT);
@@ -849,7 +849,7 @@ contract ContestControllerTest is ReferralTestHarness {
     
     function test_addSecondaryPosition_EntryDoesNotExist() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
 
         _fundUser(user2, PURCHASE_INCREMENT);
@@ -861,7 +861,7 @@ contract ContestControllerTest is ReferralTestHarness {
     
     function test_addSecondaryPosition_ZeroAmount() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
         
         _fundUser(user2, PURCHASE_INCREMENT);
@@ -873,7 +873,7 @@ contract ContestControllerTest is ReferralTestHarness {
 
     function test_addSecondaryPosition_BelowMinimum() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
 
         uint256 dust = 1;
@@ -886,7 +886,7 @@ contract ContestControllerTest is ReferralTestHarness {
 
     function test_addSecondaryPosition_ExactMinimum() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
 
         uint256 minBuy = contest.minSecondaryPurchaseAmount();
@@ -902,7 +902,7 @@ contract ContestControllerTest is ReferralTestHarness {
     
     function test_addSecondaryPosition_InvalidMerkleProof() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
         
         address[] memory addresses = new address[](2);
@@ -911,7 +911,7 @@ contract ContestControllerTest is ReferralTestHarness {
         
         (bytes32 root, ) = _generateMerkleTree(addresses);
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.setSecondaryMerkleRoot(root);
         
         _fundUser(user4, PURCHASE_INCREMENT);
@@ -929,7 +929,7 @@ contract ContestControllerTest is ReferralTestHarness {
         // Zero-token mint protection for payments that clear the floor is covered in
         // SecondaryPricing unit tests (very small payment at high supply).
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
 
         _fundUser(user2, PURCHASE_INCREMENT * 100);
@@ -946,7 +946,7 @@ contract ContestControllerTest is ReferralTestHarness {
     
     function test_addSecondaryPosition_TokensReceived() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
         _fundUser(user2, PURCHASE_INCREMENT);
         
@@ -963,7 +963,7 @@ contract ContestControllerTest is ReferralTestHarness {
 
         ContestController usdcContest = _createContest(
             address(usdc),
-            oracle,
+            operator,
             primaryDeposit6,
             REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
@@ -978,7 +978,7 @@ contract ContestControllerTest is ReferralTestHarness {
         usdcContest.addPrimaryPosition(ENTRY_1, new bytes32[](0));
         vm.stopPrank();
 
-        vm.prank(oracle);
+        vm.prank(operator);
         usdcContest.activateContest();
 
         usdc.mint(user2, purchase6);
@@ -991,7 +991,7 @@ contract ContestControllerTest is ReferralTestHarness {
 
         // Same face-value $10 on the default 18-decimal contest
         _createPrimaryEntry(user1, ENTRY_2);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
         _fundUser(user3, PURCHASE_INCREMENT);
         vm.prank(user3);
@@ -1016,7 +1016,7 @@ contract ContestControllerTest is ReferralTestHarness {
 
         ContestController usdcContest = _createContest(
             address(usdc),
-            oracle,
+            operator,
             primaryDeposit6,
             REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
@@ -1030,7 +1030,7 @@ contract ContestControllerTest is ReferralTestHarness {
         usdcContest.addPrimaryPosition(ENTRY_1, new bytes32[](0));
         vm.stopPrank();
 
-        vm.prank(oracle);
+        vm.prank(operator);
         usdcContest.activateContest();
 
         usdc.mint(user2, minBuy6 - 1);
@@ -1052,7 +1052,7 @@ contract ContestControllerTest is ReferralTestHarness {
     
     function test_addSecondaryPosition_PriceIncreases() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
         
         uint256 price1 = contest.calculateSecondaryPrice(ENTRY_1);
@@ -1065,9 +1065,9 @@ contract ContestControllerTest is ReferralTestHarness {
         assertGt(price2, price1);
     }
     
-    function test_addSecondaryPosition_OracleFeeNotDeducted() public {
+    function test_addSecondaryPosition_ReferralFeeNotDeducted() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
         _fundUser(user2, PURCHASE_INCREMENT);
         
@@ -1081,7 +1081,7 @@ contract ContestControllerTest is ReferralTestHarness {
         _createPrimaryEntry(user1, ENTRY_1);
         _createSecondaryPosition(user2, ENTRY_1, PURCHASE_INCREMENT);
 
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.cancelContest();
         
         uint256 tokensBefore = contest.balanceOf(user2, ENTRY_1);
@@ -1114,7 +1114,7 @@ contract ContestControllerTest is ReferralTestHarness {
         uint256 depositedBefore = contest.secondaryDepositedPerEntry(user2, ENTRY_1);
         uint256 expectedPrincipalToForfeit = (depositedBefore * tokenToSell) / userBalBefore;
 
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.cancelContest();
 
         vm.prank(user2);
@@ -1128,7 +1128,7 @@ contract ContestControllerTest is ReferralTestHarness {
         _createPrimaryEntry(user1, ENTRY_1);
         _createSecondaryPosition(user2, ENTRY_1, PURCHASE_INCREMENT);
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.cancelContest();
         
         uint256 tokens = contest.balanceOf(user2, ENTRY_1);
@@ -1157,7 +1157,7 @@ contract ContestControllerTest is ReferralTestHarness {
         _createPrimaryEntry(user1, ENTRY_1);
         _createSecondaryPosition(user2, ENTRY_1, PURCHASE_INCREMENT);
 
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.cancelContest();
         
         vm.prank(user1);
@@ -1178,7 +1178,7 @@ contract ContestControllerTest is ReferralTestHarness {
         _createPrimaryEntry(user1, ENTRY_1);
         _createSecondaryPosition(user2, ENTRY_1, PURCHASE_INCREMENT);
 
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.cancelContest();
         
         uint256 tokens = contest.balanceOf(user2, ENTRY_1);
@@ -1192,7 +1192,7 @@ contract ContestControllerTest is ReferralTestHarness {
         _createPrimaryEntry(user1, ENTRY_1);
         _createSecondaryPosition(user2, ENTRY_1, PURCHASE_INCREMENT);
 
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.cancelContest();
         
         vm.prank(user2);
@@ -1205,7 +1205,7 @@ contract ContestControllerTest is ReferralTestHarness {
         uint256 depositAmount = PURCHASE_INCREMENT * 5;
         _createSecondaryPosition(user2, ENTRY_1, depositAmount);
 
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.cancelContest();
         
         uint256 tokens = contest.balanceOf(user2, ENTRY_1);
@@ -1231,7 +1231,7 @@ contract ContestControllerTest is ReferralTestHarness {
         uint256 aliceTokens = contest.balanceOf(user2, ENTRY_1);
         uint256 bobTokens = contest.balanceOf(user3, ENTRY_1);
 
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.cancelContest();
 
         vm.prank(user2);
@@ -1252,7 +1252,7 @@ contract ContestControllerTest is ReferralTestHarness {
         _createSecondaryPosition(user4, ENTRY_2, PURCHASE_INCREMENT * 5);
         
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
         
         uint256[] memory winners = new uint256[](1);
@@ -1285,7 +1285,7 @@ contract ContestControllerTest is ReferralTestHarness {
         assertEq(contest.secondaryDepositedPerEntry(user1, ENTRY_1), 0);
         assertEq(contest.balanceOf(user1, ENTRY_1), 0);
 
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
 
         uint256[] memory winners = new uint256[](1);
@@ -1317,7 +1317,7 @@ contract ContestControllerTest is ReferralTestHarness {
         _createSecondaryPosition(user3, ENTRY_1, PURCHASE_INCREMENT);
         _createSecondaryPosition(user4, ENTRY_2, PURCHASE_INCREMENT);
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
         
         uint256[] memory winners = new uint256[](1);
@@ -1334,9 +1334,9 @@ contract ContestControllerTest is ReferralTestHarness {
     function test_claimSecondaryPayout_NoBalance() public {
         _createPrimaryEntry(user1, ENTRY_1);
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
         
         uint256[] memory winners = new uint256[](1);
@@ -1357,7 +1357,7 @@ contract ContestControllerTest is ReferralTestHarness {
         _createSecondaryPosition(user4, ENTRY_1, PURCHASE_INCREMENT * 5);
         _createSecondaryPosition(user5, ENTRY_2, PURCHASE_INCREMENT * 10);
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
         
         uint256[] memory winners = new uint256[](1);
@@ -1389,7 +1389,7 @@ contract ContestControllerTest is ReferralTestHarness {
         _createSecondaryPosition(user3, ENTRY_1, PURCHASE_INCREMENT * 2);
         _createSecondaryPosition(user4, ENTRY_2, PURCHASE_INCREMENT * 3);
 
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
 
         uint256 tvlBefore = contest.getSecondarySideBalance();
@@ -1426,7 +1426,7 @@ contract ContestControllerTest is ReferralTestHarness {
         // Attacker is sole secondary holder on the eventual winning entry
         _createSecondaryPosition(user3, ENTRY_1, PURCHASE_INCREMENT);
 
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
 
         uint256[] memory winners = new uint256[](1);
@@ -1469,7 +1469,7 @@ contract ContestControllerTest is ReferralTestHarness {
         _createSecondaryPosition(user3, ENTRY_1, PURCHASE_INCREMENT * 4);
         _createSecondaryPosition(user4, ENTRY_1, PURCHASE_INCREMENT * 6);
 
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
         _settleContest(contest, winners, payouts);
 
@@ -1480,21 +1480,21 @@ contract ContestControllerTest is ReferralTestHarness {
         contest.claimSecondaryPayout(ENTRY_1);
         assertEq(paymentToken.balanceOf(user3) - before3, expected3);
 
-        // Contest B: identical setup; oracle pushes to user3
-        ContestController pushContest = _deployContest(oracle, EXPIRY_OFFSET);
+        // Contest B: identical setup; operator pushes to user3
+        ContestController pushContest = _deployContest(operator, EXPIRY_OFFSET);
         _createPrimaryEntryOn(pushContest, user1, ENTRY_1);
         _createPrimaryEntryOn(pushContest, user2, ENTRY_2);
         _createSecondaryPositionOn(pushContest, user3, ENTRY_1, PURCHASE_INCREMENT * 4);
         _createSecondaryPositionOn(pushContest, user4, ENTRY_1, PURCHASE_INCREMENT * 6);
 
-        vm.prank(oracle);
+        vm.prank(operator);
         pushContest.lockContest();
         _settleContest(pushContest, winners, payouts);
 
         uint256 beforePush3 = paymentToken.balanceOf(user3);
         address[] memory participants = new address[](1);
         participants[0] = user3;
-        vm.prank(oracle);
+        vm.prank(operator);
         pushContest.pushSecondaryPayouts(participants, ENTRY_1);
         assertEq(paymentToken.balanceOf(user3) - beforePush3, expected3);
     }
@@ -1503,7 +1503,7 @@ contract ContestControllerTest is ReferralTestHarness {
         _createPrimaryEntry(user1, ENTRY_1);
         _createSecondaryPosition(user2, ENTRY_1, PURCHASE_INCREMENT);
 
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
 
         uint256[] memory winners = new uint256[](1);
@@ -1511,50 +1511,50 @@ contract ContestControllerTest is ReferralTestHarness {
         uint256[] memory payouts = new uint256[](1);
         payouts[0] = 10_000;
 
-        uint256 oracleBeforeSettle = paymentToken.balanceOf(oracle);
+        uint256 operatorBeforeSettle = paymentToken.balanceOf(operator);
         _settleContest(contest, winners, payouts);
-        assertEq(paymentToken.balanceOf(oracle), oracleBeforeSettle);
+        assertEq(paymentToken.balanceOf(operator), operatorBeforeSettle);
 
         // Donate dust so balance exceeds claimable liabilities
         uint256 dust = 7;
         paymentToken.mint(address(contest), dust);
         uint256 secondaryLiqBefore = contest.secondaryLiquidityPerEntry(ENTRY_1);
-        uint256 oracleBeforePush = paymentToken.balanceOf(oracle);
+        uint256 operatorBeforePush = paymentToken.balanceOf(operator);
 
         uint256[] memory entryIds = new uint256[](0);
-        vm.prank(oracle);
+        vm.prank(operator);
         vm.expectEmit(false, false, false, true);
         emit ContestController.UnallocatedBalanceAllocated(dust);
         contest.pushPrimaryPayouts(entryIds);
 
         assertEq(contest.secondaryLiquidityPerEntry(ENTRY_1), secondaryLiqBefore + dust);
-        assertEq(paymentToken.balanceOf(oracle), oracleBeforePush);
+        assertEq(paymentToken.balanceOf(operator), operatorBeforePush);
         assertEq(contest.outstandingClaimableLiabilities(), contest.primaryPrizePoolPayouts(ENTRY_1) + secondaryLiqBefore + dust);
 
-        // Full push still drains without paying oracle
+        // Full push still drains without paying operator
         entryIds = new uint256[](1);
         entryIds[0] = ENTRY_1;
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.pushPrimaryPayouts(entryIds);
 
         address[] memory participants = new address[](1);
         participants[0] = user2;
         uint256 user2Before = paymentToken.balanceOf(user2);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.pushSecondaryPayouts(participants, ENTRY_1);
 
         assertEq(uint8(contest.state()), uint8(ContestState.SETTLED));
         assertEq(contest.outstandingClaimableLiabilities(), 0);
         assertEq(_getContractBalance(), 0);
-        assertEq(paymentToken.balanceOf(oracle), oracleBeforePush);
+        assertEq(paymentToken.balanceOf(operator), operatorBeforePush);
         assertEq(paymentToken.balanceOf(user2) - user2Before, secondaryLiqBefore + dust);
     }
 
     function test_pushPayouts_allocatesUnallocatedBalanceToPrimaryWhenNoSecondary() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
 
         uint256[] memory winners = new uint256[](1);
@@ -1566,23 +1566,23 @@ contract ContestControllerTest is ReferralTestHarness {
         uint256 dust = 11;
         paymentToken.mint(address(contest), dust);
         uint256 primaryBefore = contest.primaryPrizePoolPayouts(ENTRY_1);
-        uint256 oracleBefore = paymentToken.balanceOf(oracle);
+        uint256 operatorBefore = paymentToken.balanceOf(operator);
 
         uint256[] memory entryIds = new uint256[](0);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.pushPrimaryPayouts(entryIds);
 
         assertEq(contest.primaryPrizePoolPayouts(ENTRY_1), primaryBefore + dust);
-        assertEq(paymentToken.balanceOf(oracle), oracleBefore);
+        assertEq(paymentToken.balanceOf(operator), operatorBefore);
 
         entryIds = new uint256[](1);
         entryIds[0] = ENTRY_1;
         uint256 user1Before = paymentToken.balanceOf(user1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.pushPrimaryPayouts(entryIds);
 
         assertEq(paymentToken.balanceOf(user1) - user1Before, primaryBefore + dust);
-        assertEq(paymentToken.balanceOf(oracle), oracleBefore);
+        assertEq(paymentToken.balanceOf(operator), operatorBefore);
         assertEq(_getContractBalance(), 0);
     }
 
@@ -1609,7 +1609,7 @@ contract ContestControllerTest is ReferralTestHarness {
 
     function test_addSecondaryPosition_RevertsWhenExpired() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
 
         vm.warp(contest.expiryTimestamp());
@@ -1626,7 +1626,7 @@ contract ContestControllerTest is ReferralTestHarness {
     function test_activateContest_Success() public {
         _createPrimaryEntry(user1, ENTRY_1);
         
-        vm.prank(oracle);
+        vm.prank(operator);
         vm.expectEmit(true, false, false, false);
         emit ContestController.ContestActivated();
         contest.activateContest();
@@ -1637,25 +1637,25 @@ contract ContestControllerTest is ReferralTestHarness {
     function test_activateContest_AlreadyStarted() public {
         _createPrimaryEntry(user1, ENTRY_1);
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
         
-        vm.prank(oracle);
+        vm.prank(operator);
         vm.expectRevert("Contest already started");
         contest.activateContest();
     }
     
     function test_activateContest_NoEntries() public {
-        vm.prank(oracle);
+        vm.prank(operator);
         vm.expectRevert("No entries");
         contest.activateContest();
     }
     
-    function test_activateContest_NotOracle() public {
+    function test_activateContest_NotOperator() public {
         _createPrimaryEntry(user1, ENTRY_1);
         
-        vm.prank(nonOracle);
-        vm.expectRevert("Not oracle");
+        vm.prank(nonOperator);
+        vm.expectRevert("Not operator");
         contest.activateContest();
     }
     
@@ -1663,10 +1663,10 @@ contract ContestControllerTest is ReferralTestHarness {
     
     function test_lockContest_Success() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
         
-        vm.prank(oracle);
+        vm.prank(operator);
         vm.expectEmit(true, false, false, false);
         emit ContestController.ContestLocked();
         contest.lockContest();
@@ -1675,18 +1675,18 @@ contract ContestControllerTest is ReferralTestHarness {
     }
     
     function test_lockContest_NotActiveState() public {
-        vm.prank(oracle);
+        vm.prank(operator);
         vm.expectRevert("Contest not active");
         contest.lockContest();
     }
     
-    function test_lockContest_NotOracle() public {
+    function test_lockContest_NotOperator() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
         
-        vm.prank(nonOracle);
-        vm.expectRevert("Not oracle");
+        vm.prank(nonOperator);
+        vm.expectRevert("Not operator");
         contest.lockContest();
     }
     
@@ -1695,9 +1695,9 @@ contract ContestControllerTest is ReferralTestHarness {
     function test_settleContest_Success() public {
         _createPrimaryEntry(user1, ENTRY_1);
         _createPrimaryEntry(user2, ENTRY_2);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
         
         uint256[] memory winners = new uint256[](2);
@@ -1707,7 +1707,7 @@ contract ContestControllerTest is ReferralTestHarness {
         payouts[0] = 7000; // 70%
         payouts[1] = 3000; // 30%
         
-        vm.prank(oracle);
+        vm.prank(operator);
         vm.expectEmit(true, false, false, false);
         emit ContestController.ContestSettled(winners, payouts, ENTRY_1);
         contest.settleContest(winners, payouts, ENTRY_1);
@@ -1722,7 +1722,7 @@ contract ContestControllerTest is ReferralTestHarness {
     function test_settleContest_PayoutsSumTo100() public {
         _createPrimaryEntry(user1, ENTRY_1);
         _createPrimaryEntry(user2, ENTRY_2);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
         
         uint256[] memory winners = new uint256[](2);
@@ -1739,7 +1739,7 @@ contract ContestControllerTest is ReferralTestHarness {
     function test_settleContest_SecondaryWinnerSet() public {
         _createPrimaryEntry(user1, ENTRY_1);
         _createPrimaryEntry(user2, ENTRY_2);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
         
         uint256[] memory winners = new uint256[](2);
@@ -1760,7 +1760,7 @@ contract ContestControllerTest is ReferralTestHarness {
         _createSecondaryPosition(user3, ENTRY_1, PURCHASE_INCREMENT);
         _createSecondaryPosition(user4, ENTRY_2, PURCHASE_INCREMENT * 2);
 
-        ContestController contestB = _deployContest(oracle, EXPIRY_OFFSET);
+        ContestController contestB = _deployContest(operator, EXPIRY_OFFSET);
         _createPrimaryEntryOn(contestB, user1, ENTRY_1);
         _createPrimaryEntryOn(contestB, user2, ENTRY_2);
         _createSecondaryPositionOn(contestB, user3, ENTRY_1, PURCHASE_INCREMENT);
@@ -1793,7 +1793,7 @@ contract ContestControllerTest is ReferralTestHarness {
     function test_settleContest_RejectsSecondaryWinnerNotInWinningEntries() public {
         _createPrimaryEntry(user1, ENTRY_1);
         _createPrimaryEntry(user2, ENTRY_2);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
 
         uint256[] memory winners = new uint256[](1);
@@ -1808,7 +1808,7 @@ contract ContestControllerTest is ReferralTestHarness {
 
     function test_settleContest_RejectsInactiveSecondaryWinner() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
 
         uint256[] memory winners = new uint256[](1);
@@ -1827,7 +1827,7 @@ contract ContestControllerTest is ReferralTestHarness {
         // No secondary positions on ENTRY_1
         _createSecondaryPosition(user3, ENTRY_2, PURCHASE_INCREMENT);
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
         
         uint256[] memory winners = new uint256[](1);
@@ -1866,7 +1866,7 @@ contract ContestControllerTest is ReferralTestHarness {
 
     function test_settleContest_RevertsFromActive() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
 
         uint256[] memory winners = new uint256[](1);
@@ -1874,14 +1874,14 @@ contract ContestControllerTest is ReferralTestHarness {
         uint256[] memory payouts = new uint256[](1);
         payouts[0] = 10000;
 
-        vm.prank(oracle);
+        vm.prank(operator);
         vm.expectRevert("Contest not locked");
         contest.settleContest(winners, payouts, ENTRY_1);
     }
     
     function test_settleContest_NoWinners() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
         
         uint256[] memory winners = new uint256[](0);
@@ -1892,7 +1892,7 @@ contract ContestControllerTest is ReferralTestHarness {
     
     function test_settleContest_ArrayLengthMismatch() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
         
         uint256[] memory winners = new uint256[](1);
@@ -1906,7 +1906,7 @@ contract ContestControllerTest is ReferralTestHarness {
     
     function test_settleContest_TooManyWinners() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
         
         uint256[] memory winners = new uint256[](2);
@@ -1921,7 +1921,7 @@ contract ContestControllerTest is ReferralTestHarness {
     
     function test_settleContest_PayoutsDontSumTo100() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
         
         uint256[] memory winners = new uint256[](1);
@@ -1935,7 +1935,7 @@ contract ContestControllerTest is ReferralTestHarness {
     function test_settleContest_ZeroPayouts() public {
         _createPrimaryEntry(user1, ENTRY_1);
         _createPrimaryEntry(user2, ENTRY_2);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
         
         uint256[] memory winners = new uint256[](2);
@@ -1953,7 +1953,7 @@ contract ContestControllerTest is ReferralTestHarness {
     function test_cancelContest_SuccessFromOpen() public {
         _createPrimaryEntry(user1, ENTRY_1);
         
-        vm.prank(oracle);
+        vm.prank(operator);
         vm.expectEmit(true, false, false, false);
         emit ContestController.ContestCancelled();
         contest.cancelContest();
@@ -1963,10 +1963,10 @@ contract ContestControllerTest is ReferralTestHarness {
     
     function test_cancelContest_SuccessFromActive() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.cancelContest();
         
         assertEq(uint8(contest.state()), uint8(ContestState.CANCELLED));
@@ -1974,12 +1974,12 @@ contract ContestControllerTest is ReferralTestHarness {
     
     function test_cancelContest_SuccessFromLocked() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.cancelContest();
         
         assertEq(uint8(contest.state()), uint8(ContestState.CANCELLED));
@@ -1987,7 +1987,7 @@ contract ContestControllerTest is ReferralTestHarness {
     
     function test_cancelContest_AlreadySettled() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
         
         uint256[] memory winners = new uint256[](1);
@@ -1996,23 +1996,23 @@ contract ContestControllerTest is ReferralTestHarness {
         payouts[0] = 10000;
         _settleContest(contest, winners, payouts);
         
-        vm.prank(oracle);
+        vm.prank(operator);
         vm.expectRevert("Contest settled - cannot cancel");
         contest.cancelContest();
     }
     
-    function test_cancelContest_NotOracle() public {
+    function test_cancelContest_NotOperator() public {
         _createPrimaryEntry(user1, ENTRY_1);
         
-        vm.prank(nonOracle);
-        vm.expectRevert("Not oracle");
+        vm.prank(nonOperator);
+        vm.expectRevert("Not operator");
         contest.cancelContest();
     }
     
     // ============ cancelExpired Tests ============
     
     function test_cancelExpired_Success() public {
-        ContestController expiredContest = _deployContest(oracle, 1 days);
+        ContestController expiredContest = _deployContest(operator, 1 days);
         vm.warp(block.timestamp + 1 days + expiredContest.SETTLEMENT_GRACE_PERIOD() + 1);
         
         expiredContest.cancelExpired();
@@ -2023,23 +2023,23 @@ contract ContestControllerTest is ReferralTestHarness {
     function test_cancelExpired_GracePeriodActive() public {
         _createPrimaryEntry(user1, ENTRY_1);
         vm.warp(block.timestamp + EXPIRY_OFFSET);
-        vm.expectRevert("Oracle grace period active");
+        vm.expectRevert("Settlement grace period active");
         contest.cancelExpired();
 
         vm.warp(block.timestamp + contest.SETTLEMENT_GRACE_PERIOD() - 1);
-        vm.expectRevert("Oracle grace period active");
+        vm.expectRevert("Settlement grace period active");
         contest.cancelExpired();
     }
 
     function test_cancelExpired_LockedDuringGrace_settleStillWorks() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
 
         vm.warp(block.timestamp + EXPIRY_OFFSET);
-        vm.expectRevert("Oracle grace period active");
+        vm.expectRevert("Settlement grace period active");
         contest.cancelExpired();
 
         uint256[] memory winners = new uint256[](1);
@@ -2052,13 +2052,13 @@ contract ContestControllerTest is ReferralTestHarness {
     }
     
     function test_cancelExpired_NotExpired() public {
-        vm.expectRevert("Oracle grace period active");
+        vm.expectRevert("Settlement grace period active");
         contest.cancelExpired();
     }
     
     function test_cancelExpired_AlreadySettled() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
         
         uint256[] memory winners = new uint256[](1);
@@ -2074,9 +2074,9 @@ contract ContestControllerTest is ReferralTestHarness {
 
     function test_settledAbandonedClaimablesRemainClaimable() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
 
         uint256[] memory winners = new uint256[](1);
@@ -2101,7 +2101,7 @@ contract ContestControllerTest is ReferralTestHarness {
     function test_setPrimaryMerkleRoot_Success() public {
         bytes32 root = bytes32(uint256(123));
         
-        vm.prank(oracle);
+        vm.prank(operator);
         vm.expectEmit(true, false, false, false);
         emit ContestController.PrimaryMerkleRootUpdated(root);
         contest.setPrimaryMerkleRoot(root);
@@ -2111,18 +2111,18 @@ contract ContestControllerTest is ReferralTestHarness {
     
     function test_setPrimaryMerkleRoot_DisableGating() public {
         bytes32 root = bytes32(uint256(123));
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.setPrimaryMerkleRoot(root);
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.setPrimaryMerkleRoot(bytes32(0));
         
         assertEq(contest.primaryMerkleRoot(), bytes32(0));
     }
     
-    function test_setPrimaryMerkleRoot_NotOracle() public {
-        vm.prank(nonOracle);
-        vm.expectRevert("Not oracle");
+    function test_setPrimaryMerkleRoot_NotOperator() public {
+        vm.prank(nonOperator);
+        vm.expectRevert("Not operator");
         contest.setPrimaryMerkleRoot(bytes32(uint256(123)));
     }
     
@@ -2131,7 +2131,7 @@ contract ContestControllerTest is ReferralTestHarness {
     function test_setSecondaryMerkleRoot_Success() public {
         bytes32 root = bytes32(uint256(456));
         
-        vm.prank(oracle);
+        vm.prank(operator);
         vm.expectEmit(true, false, false, false);
         emit ContestController.SecondaryMerkleRootUpdated(root);
         contest.setSecondaryMerkleRoot(root);
@@ -2141,18 +2141,18 @@ contract ContestControllerTest is ReferralTestHarness {
     
     function test_setSecondaryMerkleRoot_DisableGating() public {
         bytes32 root = bytes32(uint256(456));
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.setSecondaryMerkleRoot(root);
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.setSecondaryMerkleRoot(bytes32(0));
         
         assertEq(contest.secondaryMerkleRoot(), bytes32(0));
     }
     
-    function test_setSecondaryMerkleRoot_NotOracle() public {
-        vm.prank(nonOracle);
-        vm.expectRevert("Not oracle");
+    function test_setSecondaryMerkleRoot_NotOperator() public {
+        vm.prank(nonOperator);
+        vm.expectRevert("Not operator");
         contest.setSecondaryMerkleRoot(bytes32(uint256(456)));
     }
     
@@ -2164,9 +2164,9 @@ contract ContestControllerTest is ReferralTestHarness {
         _createPrimaryEntry(user1, ENTRY_1);
         _createPrimaryEntry(user2, ENTRY_2);
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
         
         uint256[] memory winners = new uint256[](2);
@@ -2182,7 +2182,7 @@ contract ContestControllerTest is ReferralTestHarness {
         
         uint256 balanceBefore = paymentToken.balanceOf(user1);
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.pushPrimaryPayouts(entryIds);
         
         assertGt(paymentToken.balanceOf(user1), balanceBefore);
@@ -2194,7 +2194,7 @@ contract ContestControllerTest is ReferralTestHarness {
         _createPrimaryEntry(user2, ENTRY_2);
         _createSecondaryPosition(user3, ENTRY_1, PURCHASE_INCREMENT * 10);
 
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
 
         uint256[] memory winners = new uint256[](2);
@@ -2211,7 +2211,7 @@ contract ContestControllerTest is ReferralTestHarness {
         uint256 payout = contest.primaryPrizePoolPayouts(ENTRY_1);
         uint256 balanceBefore = paymentToken.balanceOf(user1);
 
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.pushPrimaryPayouts(entryIds);
 
         assertEq(paymentToken.balanceOf(user1), balanceBefore + payout);
@@ -2223,7 +2223,7 @@ contract ContestControllerTest is ReferralTestHarness {
         uint256[] memory entryIds = new uint256[](1);
         entryIds[0] = ENTRY_1;
         
-        vm.prank(oracle);
+        vm.prank(operator);
         vm.expectRevert("Contest not settled");
         contest.pushPrimaryPayouts(entryIds);
     }
@@ -2234,9 +2234,9 @@ contract ContestControllerTest is ReferralTestHarness {
         vm.prank(user1);
         contest.removePrimaryPosition(ENTRY_1);
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
         
         uint256[] memory winners = new uint256[](1);
@@ -2252,7 +2252,7 @@ contract ContestControllerTest is ReferralTestHarness {
         entryIds[0] = ENTRY_1; // withdrawn — soft-skipped
         entryIds[1] = ENTRY_2;
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.pushPrimaryPayouts(entryIds);
 
         assertEq(paymentToken.balanceOf(user2), user2Before + expected);
@@ -2267,7 +2267,7 @@ contract ContestControllerTest is ReferralTestHarness {
         _createSecondaryPosition(user3, ENTRY_1, PURCHASE_INCREMENT * 10);
         _createSecondaryPosition(user4, ENTRY_1, PURCHASE_INCREMENT * 5);
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
         
         uint256[] memory winners = new uint256[](1);
@@ -2281,7 +2281,7 @@ contract ContestControllerTest is ReferralTestHarness {
         
         uint256 balanceBefore = paymentToken.balanceOf(user3);
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.pushSecondaryPayouts(participants, ENTRY_1);
         
         assertGt(paymentToken.balanceOf(user3), balanceBefore);
@@ -2295,7 +2295,7 @@ contract ContestControllerTest is ReferralTestHarness {
         address[] memory participants = new address[](1);
         participants[0] = user2;
         
-        vm.prank(oracle);
+        vm.prank(operator);
         vm.expectRevert("Contest not settled");
         contest.pushSecondaryPayouts(participants, ENTRY_1);
     }
@@ -2305,7 +2305,7 @@ contract ContestControllerTest is ReferralTestHarness {
         _createPrimaryEntry(user2, ENTRY_2);
         _createSecondaryPosition(user3, ENTRY_2, PURCHASE_INCREMENT);
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
         
         uint256[] memory winners = new uint256[](1);
@@ -2317,7 +2317,7 @@ contract ContestControllerTest is ReferralTestHarness {
         address[] memory participants = new address[](1);
         participants[0] = user3;
         
-        vm.prank(oracle);
+        vm.prank(operator);
         vm.expectRevert("Not winning entry");
         contest.pushSecondaryPayouts(participants, ENTRY_2);
     }
@@ -2432,26 +2432,26 @@ contract ContestControllerTest is ReferralTestHarness {
         _createPrimaryEntry(user1, ENTRY_1);
         assertEq(uint8(contest.state()), uint8(ContestState.OPEN));
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
         assertEq(uint8(contest.state()), uint8(ContestState.ACTIVE));
     }
     
     function test_stateTransition_ActiveToLocked() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
         assertEq(uint8(contest.state()), uint8(ContestState.LOCKED));
     }
     
     function test_stateTransition_LockedToSettled() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
         
         uint256[] memory winners = new uint256[](1);
@@ -2465,14 +2465,14 @@ contract ContestControllerTest is ReferralTestHarness {
     function test_stateTransition_OpenToCancelled() public {
         _createPrimaryEntry(user1, ENTRY_1);
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.cancelContest();
         assertEq(uint8(contest.state()), uint8(ContestState.CANCELLED));
     }
     
     function test_stateTransition_CannotActivateAfterSettled() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
         
         uint256[] memory winners = new uint256[](1);
@@ -2481,7 +2481,7 @@ contract ContestControllerTest is ReferralTestHarness {
         payouts[0] = 10000;
         _settleContest(contest, winners, payouts);
         
-        vm.prank(oracle);
+        vm.prank(operator);
         vm.expectRevert("Contest already started");
         contest.activateContest();
     }
@@ -2528,7 +2528,7 @@ contract ContestControllerTest is ReferralTestHarness {
         amount = bound(amount, PURCHASE_INCREMENT, PURCHASE_INCREMENT * 100);
         
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
         _fundUser(user2, amount);
         
@@ -2624,7 +2624,7 @@ contract ContestControllerTest is ReferralTestHarness {
         uint256 balanceBefore = paymentToken.balanceOf(user1);
         
         // Try to add in wrong state
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
         
         _fundUser(user1, PRIMARY_DEPOSIT);
@@ -2640,7 +2640,7 @@ contract ContestControllerTest is ReferralTestHarness {
         _createPrimaryEntry(user1, ENTRY_1);
         uint256 balanceBefore = paymentToken.balanceOf(user1);
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
         
         vm.prank(user1);
@@ -2687,7 +2687,7 @@ contract ContestControllerTest is ReferralTestHarness {
 
     function test_UX_BuyBelowMinimum_DustRejected() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
 
         uint256 dust = 1;
@@ -2703,7 +2703,7 @@ contract ContestControllerTest is ReferralTestHarness {
         _createPrimaryEntry(user2, ENTRY_2);
         _createSecondaryPosition(user3, ENTRY_1, PURCHASE_INCREMENT * 10);
 
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
 
         uint256[] memory winners = new uint256[](2);
@@ -2727,7 +2727,7 @@ contract ContestControllerTest is ReferralTestHarness {
         // Create an entry first so we can activate
         _createPrimaryEntry(user2, ENTRY_2);
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
         
         _fundUser(user1, PRIMARY_DEPOSIT);
@@ -2739,7 +2739,7 @@ contract ContestControllerTest is ReferralTestHarness {
         // Actually, once cancelled, we're in CANCELLED state, not OPEN
         // So we need a new contest or test in a different way
         // Let's test other clear error messages instead
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.cancelContest();
         
         // In CANCELLED state, can't add entries either
@@ -2749,7 +2749,7 @@ contract ContestControllerTest is ReferralTestHarness {
         contest.addPrimaryPosition(ENTRY_1, new bytes32[](0));
         
         // Create a fresh contest to test "Entry already exists"
-        ContestController newContest = _deployContest(oracle, EXPIRY_OFFSET);
+        ContestController newContest = _deployContest(operator, EXPIRY_OFFSET);
         paymentToken.mint(user1, PRIMARY_DEPOSIT);
         vm.prank(user1);
         paymentToken.approve(address(newContest), PRIMARY_DEPOSIT);
@@ -2774,7 +2774,7 @@ contract ContestControllerTest is ReferralTestHarness {
         uint256 expectedRefund = (depositAmount * sellAmt) / tokens;
         uint256 balanceBefore = paymentToken.balanceOf(user2);
 
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.cancelContest();
         
         vm.prank(user2);
@@ -2789,7 +2789,7 @@ contract ContestControllerTest is ReferralTestHarness {
     function test_edgeCase_EmptyContest() public {
         assertEq(contest.getEntriesCount(), 0);
         
-        vm.prank(oracle);
+        vm.prank(operator);
         vm.expectRevert("No entries");
         contest.activateContest();
     }
@@ -2797,9 +2797,9 @@ contract ContestControllerTest is ReferralTestHarness {
     function test_edgeCase_SingleEntry() public {
         _createPrimaryEntry(user1, ENTRY_1);
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
         
         uint256[] memory winners = new uint256[](1);
@@ -2832,9 +2832,9 @@ contract ContestControllerTest is ReferralTestHarness {
         _createPrimaryEntry(user1, ENTRY_1);
         _createPrimaryEntry(user2, ENTRY_2);
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
         
         uint256[] memory winners = new uint256[](1);
@@ -2850,9 +2850,9 @@ contract ContestControllerTest is ReferralTestHarness {
     function test_edgeCase_SecondaryMarketNoParticipants() public {
         _createPrimaryEntry(user1, ENTRY_1);
         
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
         
         uint256[] memory winners = new uint256[](1);
@@ -2875,7 +2875,7 @@ contract ContestControllerTest is ReferralTestHarness {
         _createPrimaryEntry(winner, ENTRY_1);
         _createSecondaryPosition(user2, ENTRY_1, PURCHASE_INCREMENT * 5);
 
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
 
         uint256 referralFee = _referralFeeAmount(contest);
@@ -2898,7 +2898,7 @@ contract ContestControllerTest is ReferralTestHarness {
     function test_settleContest_ReferralFeeZeroSkipsDistribution() public {
         ContestController zeroFee = _createContest(
             address(paymentToken),
-            oracle,
+            operator,
             PRIMARY_DEPOSIT,
             0,
             block.timestamp + EXPIRY_OFFSET,
@@ -2908,10 +2908,10 @@ contract ContestControllerTest is ReferralTestHarness {
         vm.prank(user1);
         zeroFee.addPrimaryPosition(ENTRY_1, new bytes32[](0));
 
-        vm.prank(oracle);
+        vm.prank(operator);
         zeroFee.activateContest();
 
-        uint256 oracleBefore = paymentToken.balanceOf(oracle);
+        uint256 operatorBefore = paymentToken.balanceOf(operator);
         address referrer = address(0xA11);
         uint256 referrerBefore = paymentToken.balanceOf(referrer);
 
@@ -2921,15 +2921,15 @@ contract ContestControllerTest is ReferralTestHarness {
         payouts[0] = 10_000;
         _settleContest(zeroFee, winners, payouts);
 
-        assertEq(paymentToken.balanceOf(oracle), oracleBefore);
+        assertEq(paymentToken.balanceOf(operator), operatorBefore);
         assertEq(paymentToken.balanceOf(referrer), referrerBefore);
     }
 
     function test_claimPrimaryPayout_NoFeeDeduction() public {
         _createPrimaryEntry(user1, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
 
         uint256[] memory winners = new uint256[](1);
@@ -2950,7 +2950,7 @@ contract ContestControllerTest is ReferralTestHarness {
         _createSecondaryPosition(user2, ENTRY_1, PURCHASE_INCREMENT);
 
         uint256 referralFee = _referralFeeAmount(contest);
-        uint256 oracleBefore = paymentToken.balanceOf(oracle);
+        uint256 operatorBefore = paymentToken.balanceOf(operator);
         uint256 totalPrimary = contest.primaryPrizePool();
         uint256 totalSecondary = contest.getSecondarySideBalance();
         uint256 netBps = 10_000 - REFERRAL_NETWORK_BPS;
@@ -2965,7 +2965,7 @@ contract ContestControllerTest is ReferralTestHarness {
         payouts[0] = 10_000;
         _settleContest(contest, winners, payouts);
 
-        assertEq(paymentToken.balanceOf(oracle), oracleBefore);
+        assertEq(paymentToken.balanceOf(operator), operatorBefore);
         assertEq(contest.primaryPrizePoolPayouts(ENTRY_1), expectedPrimaryPayout);
         assertEq(contest.primaryPrizePool(), expectedPrimaryPayout);
         assertEq(contest.secondaryLiquidityPerEntry(ENTRY_1), expectedSecondary);
@@ -2975,9 +2975,9 @@ contract ContestControllerTest is ReferralTestHarness {
     function test_settleContest_RejectsDuplicateWinners() public {
         _createPrimaryEntry(user1, ENTRY_1);
         _createPrimaryEntry(user2, ENTRY_2);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
 
         uint256[] memory winners = new uint256[](2);
@@ -2987,7 +2987,7 @@ contract ContestControllerTest is ReferralTestHarness {
         payouts[0] = 6000;
         payouts[1] = 4000;
 
-        vm.prank(oracle);
+        vm.prank(operator);
         vm.expectRevert("Duplicate winning entry");
         contest.settleContest(winners, payouts, ENTRY_1);
     }
@@ -2995,9 +2995,9 @@ contract ContestControllerTest is ReferralTestHarness {
     function test_settleContest_RejectsNonMemberWinner() public {
         _createPrimaryEntry(user1, ENTRY_1);
         _createPrimaryEntry(user2, ENTRY_2);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
 
         uint256[] memory winners = new uint256[](2);
@@ -3007,7 +3007,7 @@ contract ContestControllerTest is ReferralTestHarness {
         payouts[0] = 6000;
         payouts[1] = 4000;
 
-        vm.prank(oracle);
+        vm.prank(operator);
         vm.expectRevert("Winner not an active entry");
         contest.settleContest(winners, payouts, ENTRY_1);
     }
@@ -3016,7 +3016,7 @@ contract ContestControllerTest is ReferralTestHarness {
         MaliciousOverpayCalculator evil = new MaliciousOverpayCalculator();
         address contestAddress = factory.createContest(
             address(paymentToken),
-            oracle,
+            operator,
             PRIMARY_DEPOSIT,
             REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
@@ -3033,16 +3033,16 @@ contract ContestControllerTest is ReferralTestHarness {
         _fundUserContest(user1, c, PRIMARY_DEPOSIT);
         vm.prank(user1);
         c.addPrimaryPosition(ENTRY_1, new bytes32[](0));
-        vm.prank(oracle);
+        vm.prank(operator);
         c.activateContest();
         _fundUserContest(user2, c, PURCHASE_INCREMENT);
         vm.prank(user2);
         c.addSecondaryPosition(ENTRY_1, PURCHASE_INCREMENT, new bytes32[](0));
-        vm.prank(oracle);
+        vm.prank(operator);
         c.lockContest();
 
         uint256 referralFee = _referralFeeAmount(c);
-        uint256 oracleBefore = paymentToken.balanceOf(oracle);
+        uint256 operatorBefore = paymentToken.balanceOf(operator);
         uint256 referrerBefore = paymentToken.balanceOf(referrer);
         uint256 totalPrimary = c.primaryPrizePool();
         uint256 totalSecondary = c.getSecondarySideBalance();
@@ -3058,7 +3058,7 @@ contract ContestControllerTest is ReferralTestHarness {
         _settleContest(c, winners, payouts);
 
         assertEq(uint8(c.state()), uint8(ContestState.SETTLED));
-        assertEq(paymentToken.balanceOf(oracle), oracleBefore);
+        assertEq(paymentToken.balanceOf(operator), operatorBefore);
         assertEq(paymentToken.balanceOf(referrer), referrerBefore);
         assertEq(c.primaryPrizePoolPayouts(ENTRY_1), expectedPrimaryPayout);
         assertEq(c.secondaryLiquidityPerEntry(ENTRY_1), expectedSecondary);
@@ -3068,7 +3068,7 @@ contract ContestControllerTest is ReferralTestHarness {
         RevertingRewardCalculator evil = new RevertingRewardCalculator();
         address contestAddress = factory.createContest(
             address(paymentToken),
-            oracle,
+            operator,
             PRIMARY_DEPOSIT,
             REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
@@ -3085,13 +3085,13 @@ contract ContestControllerTest is ReferralTestHarness {
         _fundUserContest(user1, c, PRIMARY_DEPOSIT);
         vm.prank(user1);
         c.addPrimaryPosition(ENTRY_1, new bytes32[](0));
-        vm.prank(oracle);
+        vm.prank(operator);
         c.activateContest();
-        vm.prank(oracle);
+        vm.prank(operator);
         c.lockContest();
 
         uint256 referralFee = _referralFeeAmount(c);
-        uint256 oracleBefore = paymentToken.balanceOf(oracle);
+        uint256 operatorBefore = paymentToken.balanceOf(operator);
         uint256 totalPrimary = c.primaryPrizePool();
         uint256 totalSecondary = c.secondaryLiquidityPerEntry(ENTRY_1) + c.secondaryPrimarySubsidyPerEntry(ENTRY_1);
         uint256 netBps = _netBps(c);
@@ -3106,7 +3106,7 @@ contract ContestControllerTest is ReferralTestHarness {
         _settleContest(c, winners, payouts);
 
         assertEq(uint8(c.state()), uint8(ContestState.SETTLED));
-        assertEq(paymentToken.balanceOf(oracle), oracleBefore);
+        assertEq(paymentToken.balanceOf(operator), operatorBefore);
         assertEq(c.primaryPrizePoolPayouts(ENTRY_1), expectedPrimaryPayout);
     }
 
@@ -3114,7 +3114,7 @@ contract ContestControllerTest is ReferralTestHarness {
         // Fill almost to cap using a fresh zero-deposit contest to keep funding cheap
         address contestAddress = factory.createContest(
             address(paymentToken),
-            oracle,
+            operator,
             0,
             REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
@@ -3138,7 +3138,7 @@ contract ContestControllerTest is ReferralTestHarness {
     }
 }
 
-/// @dev Returns oversized amounts so sum > referralFee and settle falls back to oracle
+/// @dev Returns oversized amounts so sum > referralFee and settle falls back proportionally
 contract MaliciousOverpayCalculator {
     function calculateRewards(uint256, uint256 numRecipients) external pure returns (uint256[] memory amounts) {
         amounts = new uint256[](numRecipients == 0 ? 1 : numRecipients);

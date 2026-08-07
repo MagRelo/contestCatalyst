@@ -24,7 +24,7 @@ contract BreakEvenAnalysis is ReferralTestHarness {
     ContestController public contest;
     MockERC20 public paymentToken;
     
-    address public oracle = address(0x1);
+    address public operator = address(0x1);
     address public bettor1 = address(0x100); // First bettor competing for ownership
     address public bettor2 = address(0x200); // Second bettor competing for ownership
     
@@ -60,7 +60,7 @@ contract BreakEvenAnalysis is ReferralTestHarness {
         _initReferralInfra();
         contest = _createContest(
             address(paymentToken),
-            oracle,
+            operator,
             PRIMARY_DEPOSIT,
             REFERRAL_NETWORK_BPS,
             block.timestamp + 365 days,
@@ -82,7 +82,7 @@ contract BreakEvenAnalysis is ReferralTestHarness {
             vm.stopPrank();
         }
 
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
 
         for (uint256 i = 1; i <= 5; i++) {

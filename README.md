@@ -7,14 +7,6 @@ Combined competition format:
 
 Why? By combining and balancing incentives, the system achieves more than either component could independently:
 
-<!-- Alternative options:
-- Why? The combination creates synergistic value beyond what each layer offers independently:
-- Why? Balancing & pooling incentives creates value greater than the sum of its parts:
-- Why? The integration amplifies incentives, producing outcomes that exceed what either layer achieves alone:
-- Why? By combining and balancing incentives, the system achieves more than either component could independently:
-- Why? The interplay between layers creates emergent value that transcends their individual contributions:
-  -->
-
 - **Dynamic Incentives:** fluid movement of value between layers produces continuously changing incentives, sparking interest and driving activity
 - **Positive Feedback**: both markets become more compelling as prize pools grow which attracts more participants and amplifies engagement
 
@@ -22,11 +14,24 @@ Why? By combining and balancing incentives, the system achieves more than either
 
 - **[ContestFactory](src/ContestFactory.sol)**: Factory for creating new contest instances
 - **[ContestController](src/ContestController.sol)**: Main orchestrator contract managing both layers
-  - Handles state transitions (oracle-controlled)
+  - Handles state transitions (`operator`-controlled)
   - Manages primary prize pool and per-entry secondary liquidity; adding secondary positions does not move tokens into or out of the primary pool until settlement and claims
 - **[PrimaryContest](src/PrimaryContest.sol)**: Library for primary mechanics (add/remove positions, claims)
 - **[SecondaryContest](src/SecondaryContest.sol)**: Library for secondary mechanics (position management, ERC1155 operations)
 - **[SecondaryPricing](src/SecondaryPricing.sol)**: Polynomial bonding curve (`price = BASE_PRICE + COEFFICIENT * shares²`); share supply is always 18-decimal units via `toShareUnits`, independent of payment-token decimals
+
+### Trust model: `operator` is a trusted escrow agent
+
+`operator` is **not** an on-chain truth oracle. It is an immutable, trusted escrow/ops agent chosen at contest creation. Participants must trust this address (prefer a multisig in production).
+
+| Power        | Notes                                                                                                   |
+| ------------ | ------------------------------------------------------------------------------------------------------- |
+| Lifecycle    | `activateContest`, `lockContest`, `cancelContest`                                                       |
+| Settlement   | Supplies `winningEntries`, `payoutBps`, and `secondaryWinner` with **no on-chain outcome verification** |
+| Allowlists   | `setPrimaryMerkleRoot` / `setSecondaryMerkleRoot`                                                       |
+| Push payouts | `pushPrimaryPayouts` / `pushSecondaryPayouts`                                                           |
+
+This role is distinct from ReferralGraph’s per-group **authorized oracle** (referral-tree registration only).
 
 ### State Machine
 
@@ -38,20 +43,19 @@ CANCELLED ←───────┘
 
 - **OPEN**: Primary participants join/withdraw. Secondary market is **closed**.
 - **ACTIVE**: Primary locked. Secondary buys open (non-transferable ERC1155 accounting shares).
-- **LOCKED**: Secondary closed. Oracle may settle.
+- **LOCKED**: Secondary closed. Operator may settle.
 - **SETTLED**: Results in; users claim primary/secondary payouts (indefinitely — no privileged residual sweep).
 - **CANCELLED**: Refunds via remove primary/secondary.
 - **CLOSED**: Enum sentinel only; unreachable on-chain.
 
-**Operational trust / expiry notes:**
+**Operational / expiry notes:**
 
-- After `expiryTimestamp`, the oracle has an exclusive `SETTLEMENT_GRACE_PERIOD` (1 day) to `settleContest` while LOCKED. Permissionless `cancelExpired()` only unlocks after `expiryTimestamp + SETTLEMENT_GRACE_PERIOD` (lost-oracle / abandoned-contest escape hatch).
-- Hot `oracle` settles, cancels, and pushes payouts. After push batches, any **unallocated** balance (integer-division residuals / donations with no claimable owner) is credited into the secondary winning pool, or else the first still-owed primary payout — never transferred to the oracle.
-- There is no `emergencyRecoverFunds` path. Unclaimed SETTLED prizes remain claimable forever; CANCELLED deposits refund via `remove*`.
-- Use a multisig for `oracle` in production. `paymentToken` should be a standard non-fee, non-rebasing ERC20 (#12).
-- Contest operators must trust the `referralGraph` owner / per-group authorized oracles; a live `getReferrer` at settle is intentional (#8).
+- After `expiryTimestamp`, the operator has an exclusive `SETTLEMENT_GRACE_PERIOD` (1 day) to `settleContest` while LOCKED. Permissionless `cancelExpired()` only unlocks after `expiryTimestamp + SETTLEMENT_GRACE_PERIOD` (lost-operator / abandoned-contest escape hatch).
+- After push batches, any **unallocated** balance (integer-division residuals / donations with no claimable owner) is credited into the secondary winning pool, or else the first still-owed primary payout — never transferred to the operator.
+- `paymentToken` should be a standard non-fee, non-rebasing ERC20.
+- Contest deployers must also trust the `referralGraph` owner / per-group authorized oracles; a live `getReferrer` at settle is intentional.
 
-**Referral network fee:** At settlement, `referralNetworkBps` (≤10%) is deducted once from gross TVL. Distribution uses `ReferralGraph` + `RewardCalculator`; if the winner has no payable referrer or distribution fails, the fee is restored proportionally to the primary and secondary pools (never to the oracle). `claim*` / `push*` pay full net amounts.
+**Referral network fee:** At settlement, `referralNetworkBps` (≤10%) is deducted once from gross TVL. Distribution uses `ReferralGraph` + `RewardCalculator`; if the winner has no payable referrer or distribution fails, the fee is restored proportionally to the primary and secondary pools.
 
 ## Quick Usage Guide
 
@@ -81,7 +85,7 @@ contest.removeSecondaryPosition(entryId, tokenAmount);
 contest.claimSecondaryPayout(entryId);
 ```
 
-### Oracle Functions
+### Operator Functions (trusted escrow agent)
 
 ```solidity
 // State transitions
@@ -93,7 +97,7 @@ contest.settleContest(winningEntries, payoutBps, secondaryWinner);  // LOCKED �
 contest.pushPrimaryPayouts(entryIds);
 contest.pushSecondaryPayouts(participantAddresses, entryId);
 
-// Other oracle functions
+// Other operator functions
 contest.setPrimaryMerkleRoot(root);
 contest.setSecondaryMerkleRoot(root);
 contest.cancelContest();
@@ -134,7 +138,7 @@ Use the factory to create a new contest:
 ```solidity
 address contest = factory.createContest(
     paymentToken,                      // ERC20 token address (e.g., CUT)
-    oracle,                            // Hot oracle (state, settle, push)
+    operator,                          // Trusted escrow agent (lifecycle, settle, push) — prefer multisig
     contestantDepositAmount,           // Fixed deposit for primary participants
     referralNetworkBps,                // Referral network fee in basis points at settlement (max 1000 = 10%)
     expiry,                            // Expiration timestamp
@@ -148,10 +152,11 @@ address contest = factory.createContest(
 ### Example Parameters
 
 - `paymentToken`: Address of ERC20 token (typically platform token)
+- `operator`: trusted escrow/ops agent (not an on-chain truth oracle); use a multisig in production
 - `referralNetworkBps`: 500 = 5% fee at settlement (standard in tests)
 - `referralGraph` / `rewardCalculator` / `referralGroupId`: per-contest immutables; backend typically passes the same platform values for every contest
 - `primaryDepositSecondarySubsidyBps`: 700 = 7% (matches test and doc baselines in this repo)
-- `expiry`: after this timestamp, oracle has `SETTLEMENT_GRACE_PERIOD` (1 day) exclusive settle window before permissionless `cancelExpired`
+- `expiry`: after this timestamp, operator has `SETTLEMENT_GRACE_PERIOD` (1 day) exclusive settle window before permissionless `cancelExpired`
 
 ## Testing Guide
 

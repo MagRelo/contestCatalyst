@@ -26,6 +26,11 @@ interface IERC20Balance {
  *      if there is no supply on the winning entry). The secondary winner, referral fee anchor, and spill-dust remainder
  *      are taken from the explicit `secondaryWinner` settle parameter (must be in `winningEntries`), not array index 0.
  *      Each secondary buy credits liquidity and mints ERC1155 to the caller per the bonding curve from the entry's current nonnegative supply.
+ *
+ * @dev Trust model: `operator` is a trusted escrow/ops agent (not an on-chain truth oracle). It unilaterally
+ *      controls lifecycle transitions, settlement winners/`payoutBps`/`secondaryWinner`, merkle roots, cancel,
+ *      and push payouts. Participants must trust the chosen `operator` off-chain; there is no on-chain outcome
+ *      verification. Prefer a multisig in production. Distinct from ReferralGraph's authorized-oracle role.
  */
 contract ContestController is ERC1155, ReentrancyGuard {
     address public constant REFERRAL_ROOT = address(0x0000000000000000000000000000000000000001);
@@ -33,7 +38,9 @@ contract ContestController is ERC1155, ReentrancyGuard {
     address public immutable paymentToken;
     /// @notice ERC20 decimals of `paymentToken` (used to normalize secondary buys into 18-dec share units)
     uint8 public immutable paymentTokenDecimals;
-    address public immutable oracle;
+    /// @notice Trusted escrow/ops agent: lifecycle, settlement inputs, merkle roots, cancel, push payouts.
+    /// @dev Not an on-chain truth source — outcome selection is fully trusted. Immutable; no rotation.
+    address public immutable operator;
     uint256 public immutable primaryDepositAmount;
     uint256 public immutable referralNetworkBps;
     uint256 public immutable expiryTimestamp;
@@ -50,7 +57,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
     uint256 public constant MAX_REFERRAL_PAYOUT_LEVELS = 10;
     /// @notice Hard cap on concurrently active primary entries (settlement iterates `entries[]`)
     uint256 public constant MAX_ENTRIES = 500;
-    /// @notice After `expiryTimestamp`, oracle-only settle window before permissionless `cancelExpired`
+    /// @notice After `expiryTimestamp`, operator-only settle window before permissionless `cancelExpired`
     uint256 public constant SETTLEMENT_GRACE_PERIOD = 1 days;
 
     enum ContestState {
@@ -119,14 +126,14 @@ contract ContestController is ERC1155, ReentrancyGuard {
     );
     event ReferralNetworkFeeToPrimary(address indexed winner, uint256 amount);
 
-    modifier onlyOracle() {
-        require(msg.sender == oracle, "Not oracle");
+    modifier onlyOperator() {
+        require(msg.sender == operator, "Not operator");
         _;
     }
 
     constructor(
         address _paymentToken,
-        address _oracle,
+        address _operator,
         uint256 _primaryDepositAmount,
         uint256 _referralNetworkBps,
         uint256 _expiryTimestamp,
@@ -136,7 +143,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
         bytes32 _referralGroupId
     ) ERC1155() {
         require(_paymentToken != address(0), "Invalid payment token");
-        require(_oracle != address(0), "Invalid oracle");
+        require(_operator != address(0), "Invalid operator");
         require(_referralNetworkBps <= 1000, "Referral network fee too high");
         require(_expiryTimestamp > block.timestamp, "Expiry in past");
         require(_primaryDepositSecondarySubsidyBps <= BPS_DENOMINATOR, "Subsidy bps too high");
@@ -146,7 +153,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
         paymentToken = _paymentToken;
         paymentTokenDecimals = ERC20(_paymentToken).decimals();
         minSecondaryPurchaseAmount = 10 ** uint256(paymentTokenDecimals);
-        oracle = _oracle;
+        operator = _operator;
         primaryDepositAmount = _primaryDepositAmount;
         referralNetworkBps = _referralNetworkBps;
         expiryTimestamp = _expiryTimestamp;
@@ -295,20 +302,21 @@ contract ContestController is ERC1155, ReentrancyGuard {
         _paySecondaryClaim(msg.sender, entryId);
     }
 
-    function activateContest() external onlyOracle {
+    function activateContest() external onlyOperator {
         require(state == ContestState.OPEN, "Contest already started");
         require(entries.length > 0, "No entries");
         state = ContestState.ACTIVE;
         emit ContestActivated();
     }
 
-    function lockContest() external onlyOracle {
+    function lockContest() external onlyOperator {
         require(state == ContestState.ACTIVE, "Contest not active");
         state = ContestState.LOCKED;
         emit ContestLocked();
     }
 
     /// @notice Settles the contest. Primary payouts are position-paired with `payoutBps`.
+    /// @dev Trusted `operator` supplies winners and splits — no on-chain outcome verification.
     /// @param secondaryWinner Entry that receives the merged secondary pool, anchors referral fees,
     ///        and receives zero-supply spill dust. Must be an active member of `winningEntries`
     ///        (independent of array order).
@@ -316,7 +324,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
         uint256[] calldata winningEntries,
         uint256[] calldata payoutBps,
         uint256 secondaryWinner
-    ) external onlyOracle nonReentrant {
+    ) external onlyOperator nonReentrant {
         require(state == ContestState.LOCKED, "Contest not locked");
         require(winningEntries.length > 0, "Must have at least one winner");
         require(winningEntries.length == payoutBps.length, "Array length mismatch");
@@ -473,25 +481,25 @@ contract ContestController is ERC1155, ReentrancyGuard {
         emit ReferralNetworkFeeDistributed(winner, payoutAnchor, referralFee, chain, amounts);
     }
 
-    function cancelContest() external onlyOracle {
+    function cancelContest() external onlyOperator {
         require(state != ContestState.SETTLED && state != ContestState.CLOSED, "Contest settled - cannot cancel");
         state = ContestState.CANCELLED;
         emit ContestCancelled();
     }
 
-    function setPrimaryMerkleRoot(bytes32 _root) external onlyOracle {
+    function setPrimaryMerkleRoot(bytes32 _root) external onlyOperator {
         primaryMerkleRoot = _root;
         emit PrimaryMerkleRootUpdated(_root);
     }
 
-    function setSecondaryMerkleRoot(bytes32 _root) external onlyOracle {
+    function setSecondaryMerkleRoot(bytes32 _root) external onlyOperator {
         secondaryMerkleRoot = _root;
         emit SecondaryMerkleRootUpdated(_root);
     }
 
-    /// @notice Permissionless cancel after expiry plus `SETTLEMENT_GRACE_PERIOD` (oracle settle priority window).
+    /// @notice Permissionless cancel after expiry plus `SETTLEMENT_GRACE_PERIOD` (operator settle priority window).
     function cancelExpired() external {
-        require(block.timestamp >= expiryTimestamp + SETTLEMENT_GRACE_PERIOD, "Oracle grace period active");
+        require(block.timestamp >= expiryTimestamp + SETTLEMENT_GRACE_PERIOD, "Settlement grace period active");
         require(state != ContestState.SETTLED && state != ContestState.CLOSED, "Already settled");
         state = ContestState.CANCELLED;
         emit ContestCancelled();
@@ -504,7 +512,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
         toPrimaryPool = deposit - subsidy;
     }
 
-    function pushPrimaryPayouts(uint256[] calldata entryIds) external onlyOracle nonReentrant {
+    function pushPrimaryPayouts(uint256[] calldata entryIds) external onlyOperator nonReentrant {
         require(state == ContestState.SETTLED, "Contest not settled");
 
         for (uint256 i = 0; i < entryIds.length; i++) {
@@ -536,7 +544,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
 
     function pushSecondaryPayouts(address[] calldata participantAddresses, uint256 entryId)
         external
-        onlyOracle
+        onlyOperator
         nonReentrant
     {
         require(state == ContestState.SETTLED, "Contest not settled");

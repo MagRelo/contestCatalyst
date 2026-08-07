@@ -45,7 +45,7 @@ contract SecondaryContestPricingTest is ReferralTestHarness {
     ContestController public contest;
     MockERC20 public paymentToken;
     
-    address public oracle = address(0x1);
+    address public operator = address(0x1);
     address public user1 = address(0x10);
     address public user2 = address(0x20);
     address public user3 = address(0x30);
@@ -72,7 +72,7 @@ contract SecondaryContestPricingTest is ReferralTestHarness {
         _initReferralInfra();
         contest = _createContest(
             address(paymentToken),
-            oracle,
+            operator,
             PRIMARY_DEPOSIT,
             REFERRAL_NETWORK_BPS,
             block.timestamp + 365 days,
@@ -103,7 +103,7 @@ contract SecondaryContestPricingTest is ReferralTestHarness {
         contest.addPrimaryPosition(3, new bytes32[](0));
         vm.stopPrank();
 
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
     }
     

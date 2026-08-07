@@ -21,7 +21,7 @@ contract ContestLifecycleE2E is ReferralTestHarness {
 
     ContestController internal contest;
     E2EMockERC20 internal paymentToken;
-    address internal oracle = address(0x1);
+    address internal operator = address(0x1);
     address internal u1 = address(0x10);
     address internal u2 = address(0x20);
     address internal u3 = address(0x30);
@@ -32,7 +32,7 @@ contract ContestLifecycleE2E is ReferralTestHarness {
         _initReferralInfra();
         contest = _createContest(
             address(paymentToken),
-            oracle,
+            operator,
             PRIMARY_DEPOSIT,
             REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
@@ -42,7 +42,7 @@ contract ContestLifecycleE2E is ReferralTestHarness {
         paymentToken.mint(u2, 1_000_000e18);
         paymentToken.mint(u3, 1_000_000e18);
         paymentToken.mint(u4, 1_000_000e18);
-        paymentToken.mint(oracle, 1_000_000e18);
+        paymentToken.mint (operator, 1_000_000e18);
     }
 
     function _fund(address u, uint256 amt, address spender) internal {
@@ -78,7 +78,7 @@ contract ContestLifecycleE2E is ReferralTestHarness {
         _secondary(contest, u3, ENTRY_1, PURCHASE_INCREMENT * 2);
         _secondary(contest, u4, ENTRY_2, PURCHASE_INCREMENT * 3);
 
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
 
         uint256[] memory winners = new uint256[](1);
@@ -113,9 +113,9 @@ contract ContestLifecycleE2E is ReferralTestHarness {
         address pushUser = u4;
 
         _primary(contest, pullUser, ENTRY_1);
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.activateContest();
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
 
         uint256[] memory winners = new uint256[](1);
@@ -135,7 +135,7 @@ contract ContestLifecycleE2E is ReferralTestHarness {
 
         ContestController cPush = _createContest(
             address(paymentToken),
-            oracle,
+            operator,
             PRIMARY_DEPOSIT,
             REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
@@ -143,9 +143,9 @@ contract ContestLifecycleE2E is ReferralTestHarness {
         );
         _primary(cPush, pushUser, ENTRY_1);
 
-        vm.prank(oracle);
+        vm.prank(operator);
         cPush.activateContest();
-        vm.prank(oracle);
+        vm.prank(operator);
         cPush.lockContest();
         _settleContest(cPush, winners, payouts);
 
@@ -153,20 +153,20 @@ contract ContestLifecycleE2E is ReferralTestHarness {
         uint256 balBeforePush = paymentToken.balanceOf(pushUser);
         uint256[] memory entryIds = new uint256[](1);
         entryIds[0] = ENTRY_1;
-        vm.prank(oracle);
+        vm.prank(operator);
         cPush.pushPrimaryPayouts(entryIds);
         uint256 pushNet = paymentToken.balanceOf(pushUser) - balBeforePush;
         assertEq(pushNet, pushPayout);
     }
 
-    function test_E2E_Cancelled_refundsNoOracleFee() public {
+    function test_E2E_Cancelled_refundsNoReferralFee() public {
         uint256 u1Pre = paymentToken.balanceOf(u1);
         uint256 u3Pre = paymentToken.balanceOf(u3);
 
         _primary(contest, u1, ENTRY_1);
         _secondary(contest, u3, ENTRY_1, PURCHASE_INCREMENT * 2);
 
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.cancelContest();
 
         uint256 bal = contest.balanceOf(u3, ENTRY_1);
@@ -206,7 +206,7 @@ contract ContestLifecycleE2E is ReferralTestHarness {
         _primary(contest, u1, ENTRY_1);
 
         vm.warp(block.timestamp + EXPIRY_OFFSET);
-        vm.expectRevert("Oracle grace period active");
+        vm.expectRevert("Settlement grace period active");
         contest.cancelExpired();
 
         vm.warp(block.timestamp + contest.SETTLEMENT_GRACE_PERIOD());
@@ -223,7 +223,7 @@ contract ContestLifecycleE2E is ReferralTestHarness {
         _primary(contest, u2, ENTRY_2);
         _secondary(contest, u3, ENTRY_2, PURCHASE_INCREMENT);
 
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
 
         uint256[] memory winners = new uint256[](1);

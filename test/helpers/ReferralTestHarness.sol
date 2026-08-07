@@ -36,7 +36,7 @@ abstract contract ReferralTestHarness is Test {
 
     function _createContest(
         address paymentToken,
-        address contestOracle,
+        address contestOperator,
         uint256 primaryDeposit,
         uint256 referralBps,
         uint256 expiry,
@@ -44,7 +44,7 @@ abstract contract ReferralTestHarness is Test {
     ) internal returns (ContestController) {
         address addr = factory.createContest(
             paymentToken,
-            contestOracle,
+            contestOperator,
             primaryDeposit,
             referralBps,
             expiry,
@@ -113,10 +113,10 @@ abstract contract ReferralTestHarness is Test {
         uint256 secondaryWinner
     ) internal {
         if (c.state() == ContestController.ContestState.ACTIVE) {
-            vm.prank(c.oracle());
+            vm.prank(c.operator());
             c.lockContest();
         }
-        vm.prank(c.oracle());
+        vm.prank(c.operator());
         c.settleContest(winningEntries, payoutBps, secondaryWinner);
     }
 
@@ -138,10 +138,10 @@ abstract contract ReferralTestHarness is Test {
         bytes memory reason
     ) internal {
         if (c.state() == ContestController.ContestState.ACTIVE) {
-            vm.prank(c.oracle());
+            vm.prank(c.operator());
             c.lockContest();
         }
-        vm.prank(c.oracle());
+        vm.prank(c.operator());
         vm.expectRevert(reason);
         c.settleContest(winningEntries, payoutBps, secondaryWinner);
     }
@@ -149,7 +149,7 @@ abstract contract ReferralTestHarness is Test {
     /// @dev Activate if still OPEN so secondary buys succeed under ACTIVE-only gating.
     function _ensureActiveForSecondary(ContestController c) internal {
         if (c.state() == ContestController.ContestState.OPEN) {
-            vm.prank(c.oracle());
+            vm.prank(c.operator());
             c.activateContest();
         }
     }

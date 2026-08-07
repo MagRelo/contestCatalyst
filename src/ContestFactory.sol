@@ -15,7 +15,7 @@ contract ContestFactory {
 
     function createContest(
         address paymentToken,
-        address oracle,
+        address operator,
         uint256 contestantDepositAmount,
         uint256 referralNetworkBps,
         uint256 expiry,
@@ -26,7 +26,7 @@ contract ContestFactory {
     ) external returns (address) {
         ContestController contest = new ContestController(
             paymentToken,
-            oracle,
+            operator,
             contestantDepositAmount,
             referralNetworkBps,
             expiry,

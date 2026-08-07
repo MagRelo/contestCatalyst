@@ -2,19 +2,19 @@
 
 Replace claim-time oracle fees with settlement-time referral network fees (`referralNetworkBps`), integrated with [referralTree](https://github.com/MagRelo/referralTree)'s `ReferralGraph` + `RewardCalculator`. At settlement, the fee is deducted from distributable TVL and atomically pushed up the **winning entry owner's referrer chain** — the winner is the lookup key only and is **not** a referral-fee recipient.
 
-**Implemented:** [`ContestController.sol`](src/ContestController.sol) uses `referralNetworkBps` (5% standard), deducts the fee once at settlement from total distributable TVL, and pays the geometric split from contest balance when the winner has a real referrer; otherwise restores the fee proportionally to the primary and secondary pools. Claims/pushes pay **full net amounts** with no further fee deduction. After push batches, unallocated wei (no claimable owner) is credited into the secondary winning pool (or the first still-owed primary payout) so claimants receive it — never transferred to the oracle. Per-contest `referralGraph`, `rewardCalculator`, and `referralGroupId` are set on `createContest`.
+**Implemented:** [`ContestController.sol`](src/ContestController.sol) uses `referralNetworkBps` (5% standard), deducts the fee once at settlement from total distributable TVL, and pays the geometric split from contest balance when the winner has a real referrer; otherwise restores the fee proportionally to the primary and secondary pools. Claims/pushes pay **full net amounts** with no further fee deduction. After push batches, unallocated wei (no claimable owner) is credited into the secondary winning pool (or the first still-owed primary payout) so claimants receive it — never transferred to the contest operator. Per-contest `referralGraph`, `rewardCalculator`, and `referralGroupId` are set on `createContest`.
 
 ## Flow
 
 ```mermaid
 sequenceDiagram
-    participant Oracle
+    participant Operator
     participant Contest as ContestController
     participant Graph as ReferralGraph
     participant Calc as RewardCalculator
     participant Token as ERC20
 
-    Oracle->>Contest: settleContest(winners, payoutBps, secondaryWinner)
+    Operator->>Contest: settleContest(winners, payoutBps, secondaryWinner)
     Contest->>Contest: referralFee = grossTvl * referralNetworkBps / 10000
     Contest->>Graph: getReferrer(winner, groupId)
     alt no payable referrer
@@ -37,7 +37,7 @@ sequenceDiagram
 | `ContestController.referralGroupId` | Per-contest immutable |
 | `ContestController.referralNetworkBps` | Max 1000 (10%) |
 
-Rationale: referralTree is shared attribution + split math. The contest owns custody and pays recipients directly during `settleContest` (already `onlyOracle`), so no signed `ChainRewardData` or escrow middleman is required.
+Rationale: referralTree is shared attribution + split math. The contest owns custody and pays recipients directly during `settleContest` (already `onlyOperator`), so no signed `ChainRewardData` or escrow middleman is required.
 
 ## Settlement behavior
 
@@ -51,8 +51,9 @@ Rationale: referralTree is shared attribution + split math. The contest owns cus
 
 ## Trust assumptions
 
-- Contest operators must trust `ReferralGraph.owner` and the group’s authorized oracles. An authorized oracle can register an unregistered winner under an attacker-controlled referrer before settlement redirects up to `referralNetworkBps` of TVL. Participants should register referrers before settle, and operators should use a trustworthy graph/oracle set. Live `getReferrer` at settle (no lock-time snapshot) is intentional.
-- Prefer a multisig for contest `oracle`. `paymentToken` must be a standard ERC20 (no fee-on-transfer / rebasing).
+- Contest `operator` is a trusted escrow/ops agent (not an on-chain truth oracle): it unilaterally supplies settlement winners and splits. Prefer a multisig.
+- Deployers must also trust `ReferralGraph.owner` and the group’s authorized oracles (referral-tree role, distinct from contest `operator`). An authorized referral oracle can register an unregistered winner under an attacker-controlled referrer before settlement redirects up to `referralNetworkBps` of TVL. Participants should register referrers before settle. Live `getReferrer` at settle (no lock-time snapshot) is intentional.
+- `paymentToken` must be a standard ERC20 (no fee-on-transfer / rebasing).
 
 ## Tests
 

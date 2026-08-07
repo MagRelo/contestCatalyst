@@ -18,7 +18,7 @@ contract ContestBusyLifecycleE2E is ReferralTestHarness {
     ContestController internal contest;
     BusyE2EMockERC20 internal paymentToken;
 
-    address internal oracle = address(0x1);
+    address internal operator = address(0x1);
     address internal p1 = address(0x10);
     address internal p2 = address(0x20);
     address internal p3 = address(0x30);
@@ -33,14 +33,14 @@ contract ContestBusyLifecycleE2E is ReferralTestHarness {
         _initReferralInfra();
         contest = _createContest(
             address(paymentToken),
-            oracle,
+            operator,
             PRIMARY_DEPOSIT,
             REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
             PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
         );
 
-        paymentToken.mint(oracle, 1_000_000e18);
+        paymentToken.mint (operator, 1_000_000e18);
         paymentToken.mint(p1, 1_000_000e18);
         paymentToken.mint(p2, 1_000_000e18);
         paymentToken.mint(p3, 1_000_000e18);
@@ -121,7 +121,7 @@ contract ContestBusyLifecycleE2E is ReferralTestHarness {
         uint256 threeSubsidy = 3 * ((PRIMARY_DEPOSIT * PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS) / 10_000);
         assertEq(contest.getSecondarySideBalance(), totalSecondaryBought + threeSubsidy);
 
-        vm.prank(oracle);
+        vm.prank(operator);
         contest.lockContest();
 
         uint256[] memory winners = new uint256[](2);
@@ -131,11 +131,11 @@ contract ContestBusyLifecycleE2E is ReferralTestHarness {
         payouts[0] = 7_000;
         payouts[1] = 3_000;
 
-        uint256 oracleBefore = paymentToken.balanceOf(oracle);
+        uint256 operatorBefore = paymentToken.balanceOf(operator);
         uint256 primaryBefore = contest.primaryPrizePool();
         _settleContest(contest, winners, payouts);
-        // Unregistered winners: referral fee restored proportionally — oracle unchanged at settle
-        assertEq(paymentToken.balanceOf(oracle), oracleBefore);
+        // Unregistered winners: referral fee restored proportionally — operator unchanged at settle
+        assertEq(paymentToken.balanceOf(operator), operatorBefore);
 
         uint256 grossSecondary = totalSecondaryBought + threeSubsidy;
         uint256 netSecondary =
