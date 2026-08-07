@@ -11,10 +11,14 @@ Two jobs, one contest instance:
 
 Sport-agnostic by construction: the product (scoring, lineups, consensus, ops) lives off-chain in Cut; this repo is the shared cashflow and market substrate every competition plugs into.
 
-Combined format on that substrate:
+### Primary + secondary on one contest
 
-- **Primary (tournament):** fixed-deposit prize pool among entrants
-- **Secondary (prediction market):** variable buys on entries, priced on a quadratic curve; settlement merges secondary TVL onto the winning entry for pro-rata redemption
+- **Primary (tournament stake):** each entrant posts a fixed `primaryDepositAmount`. Most of it funds the Layer-1 prize pool; a BPS carve (`primaryDepositSecondarySubsidyBps`) seeds that entry’s secondary side as unbacked subsidy. After settle, named winners split the primary pool by `payoutBps`.
+- **Secondary (prediction market on those entries):** while `ACTIVE`, anyone can buy variable amounts on any entry. Each buy is priced on that entry’s own quadratic bonding curve (`price = BASE_PRICE + COEFFICIENT * shares²`), mints non-transferable ERC1155 shares to the buyer, and credits the payment to that entry’s backed `secondaryLiquidityPerEntry`. Sell-backs (OPEN/CANCELLED only) pay from that entry’s backed liquidity alone — subsidy is not withdrawable mid-contest.
+
+**Settlement merge (intentional winner-take-all):** at `settleContest`, every entry’s backed liquidity plus primary subsidy is swept into one pool on `secondaryWinner`. Holders of that entry’s ERC1155 redeem pro-rata against the **contest-wide** secondary TVL — not against only what was bought on the winner. If the winning entry has liquidity but zero share supply, the merged secondary pool spills into primary payouts instead.
+
+That split is the product shape: primary is “enter the field”; secondary is “price conviction across the field,” with early/thin entries cheaper on the curve and the aggregate secondary pot paid to whoever held the eventual winner. Pricing is local (per-entry supply); redemption is global (merged pot). Participants should size secondary buys knowing losing-entry capital funds the winning entry’s claimants.
 
 ## Contract Structure
 
