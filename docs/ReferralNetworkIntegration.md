@@ -14,7 +14,7 @@ sequenceDiagram
     participant Calc as RewardCalculator
     participant Token as ERC20
 
-    Oracle->>Contest: settleContest(winners, payoutBps)
+    Oracle->>Contest: settleContest(winners, payoutBps, secondaryWinner)
     Contest->>Contest: referralFee = grossTvl * referralNetworkBps / 10000
     Contest->>Graph: getReferrer(winner, groupId)
     alt no payable referrer
@@ -56,7 +56,7 @@ Rationale: referralTree is shared attribution + split math. The contest owns cus
 
 ## Tests
 
-[`ReferralTestHarness.sol`](test/helpers/ReferralTestHarness.sol) deploys real `ReferralGraph` + `RewardCalculator` and simplifies `_settleContest` to `settleContest(winners, payouts)`.
+[`ReferralTestHarness.sol`](test/helpers/ReferralTestHarness.sol) deploys real `ReferralGraph` + `RewardCalculator` and simplifies `_settleContest` to `settleContest(winners, payouts, secondaryWinner)` (default secondary winner is `winners[0]`).
 
 Key cases in [`ContestController.t.sol`](test/ContestController.t.sol):
 

@@ -1696,8 +1696,8 @@ contract ContestControllerTest is ReferralTestHarness {
         
         vm.prank(oracle);
         vm.expectEmit(true, false, false, false);
-        emit ContestController.ContestSettled(winners, payouts);
-        contest.settleContest(winners, payouts);
+        emit ContestController.ContestSettled(winners, payouts, ENTRY_1);
+        contest.settleContest(winners, payouts, ENTRY_1);
         
         assertEq(uint8(contest.state()), uint8(ContestState.SETTLED));
         assertGt(contest.primaryPrizePoolPayouts(ENTRY_1), 0);
@@ -1730,14 +1730,82 @@ contract ContestControllerTest is ReferralTestHarness {
         contest.activateContest();
         
         uint256[] memory winners = new uint256[](2);
-        winners[0] = ENTRY_2; // First winner is secondary winner
-        winners[1] = ENTRY_1;
+        winners[0] = ENTRY_1; // Index 0 is not the secondary winner
+        winners[1] = ENTRY_2;
         uint256[] memory payouts = new uint256[](2);
         payouts[0] = 6000;
         payouts[1] = 4000;
-        _settleContest(contest, winners, payouts);
+        _settleContest(contest, winners, payouts, ENTRY_2);
         
         assertEq(contest.secondaryWinningEntry(), ENTRY_2);
+    }
+
+    /// @dev M-1: array order must not redirect the secondary pool when secondaryWinner is fixed
+    function test_settleContest_SecondaryWinnerIndependentOfArrayOrder() public {
+        _createPrimaryEntry(user1, ENTRY_1);
+        _createPrimaryEntry(user2, ENTRY_2);
+        _createSecondaryPosition(user3, ENTRY_1, PURCHASE_INCREMENT);
+        _createSecondaryPosition(user4, ENTRY_2, PURCHASE_INCREMENT * 2);
+
+        ContestController contestB = _deployContest(oracle, EXPIRY_OFFSET);
+        _createPrimaryEntryOn(contestB, user1, ENTRY_1);
+        _createPrimaryEntryOn(contestB, user2, ENTRY_2);
+        _createSecondaryPositionOn(contestB, user3, ENTRY_1, PURCHASE_INCREMENT);
+        _createSecondaryPositionOn(contestB, user4, ENTRY_2, PURCHASE_INCREMENT * 2);
+
+        uint256[] memory winnersA = new uint256[](2);
+        winnersA[0] = ENTRY_1;
+        winnersA[1] = ENTRY_2;
+        uint256[] memory payoutsA = new uint256[](2);
+        payoutsA[0] = 6000;
+        payoutsA[1] = 4000;
+
+        uint256[] memory winnersB = new uint256[](2);
+        winnersB[0] = ENTRY_2;
+        winnersB[1] = ENTRY_1;
+        uint256[] memory payoutsB = new uint256[](2);
+        payoutsB[0] = 4000;
+        payoutsB[1] = 6000;
+
+        _settleContest(contest, winnersA, payoutsA, ENTRY_1);
+        _settleContest(contestB, winnersB, payoutsB, ENTRY_1);
+
+        assertEq(contest.secondaryWinningEntry(), ENTRY_1);
+        assertEq(contestB.secondaryWinningEntry(), ENTRY_1);
+        assertEq(contest.secondaryLiquidityPerEntry(ENTRY_1), contestB.secondaryLiquidityPerEntry(ENTRY_1));
+        assertEq(contest.primaryPrizePoolPayouts(ENTRY_1), contestB.primaryPrizePoolPayouts(ENTRY_1));
+        assertEq(contest.primaryPrizePoolPayouts(ENTRY_2), contestB.primaryPrizePoolPayouts(ENTRY_2));
+    }
+
+    function test_settleContest_RejectsSecondaryWinnerNotInWinningEntries() public {
+        _createPrimaryEntry(user1, ENTRY_1);
+        _createPrimaryEntry(user2, ENTRY_2);
+        vm.prank(oracle);
+        contest.activateContest();
+
+        uint256[] memory winners = new uint256[](1);
+        winners[0] = ENTRY_1;
+        uint256[] memory payouts = new uint256[](1);
+        payouts[0] = 10_000;
+
+        _settleContestExpectRevert(
+            contest, winners, payouts, ENTRY_2, "Secondary winner not in winningEntries"
+        );
+    }
+
+    function test_settleContest_RejectsInactiveSecondaryWinner() public {
+        _createPrimaryEntry(user1, ENTRY_1);
+        vm.prank(oracle);
+        contest.activateContest();
+
+        uint256[] memory winners = new uint256[](1);
+        winners[0] = ENTRY_1;
+        uint256[] memory payouts = new uint256[](1);
+        payouts[0] = 10_000;
+
+        _settleContestExpectRevert(
+            contest, winners, payouts, 99, "Secondary winner not an active entry"
+        );
     }
     
     function test_settleContest_NoERC1155SupplyOnWinningEntry() public {
@@ -1795,7 +1863,7 @@ contract ContestControllerTest is ReferralTestHarness {
 
         vm.prank(oracle);
         vm.expectRevert("Contest not locked");
-        contest.settleContest(winners, payouts);
+        contest.settleContest(winners, payouts, ENTRY_1);
     }
     
     function test_settleContest_NoWinners() public {
@@ -2933,24 +3001,27 @@ contract ContestControllerTest is ReferralTestHarness {
 
         vm.prank(oracle);
         vm.expectRevert("Duplicate winning entry");
-        contest.settleContest(winners, payouts);
+        contest.settleContest(winners, payouts, ENTRY_1);
     }
 
     function test_settleContest_RejectsNonMemberWinner() public {
         _createPrimaryEntry(user1, ENTRY_1);
+        _createPrimaryEntry(user2, ENTRY_2);
         vm.prank(oracle);
         contest.activateContest();
         vm.prank(oracle);
         contest.lockContest();
 
-        uint256[] memory winners = new uint256[](1);
-        winners[0] = 99;
-        uint256[] memory payouts = new uint256[](1);
-        payouts[0] = 10_000;
+        uint256[] memory winners = new uint256[](2);
+        winners[0] = ENTRY_1;
+        winners[1] = 99;
+        uint256[] memory payouts = new uint256[](2);
+        payouts[0] = 6000;
+        payouts[1] = 4000;
 
         vm.prank(oracle);
         vm.expectRevert("Winner not an active entry");
-        contest.settleContest(winners, payouts);
+        contest.settleContest(winners, payouts, ENTRY_1);
     }
 
     function test_settleContest_MaliciousCalculatorFallsBackProportionally() public {

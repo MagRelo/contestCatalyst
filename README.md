@@ -87,7 +87,7 @@ contest.claimSecondaryPayout(entryId);
 // State transitions
 contest.activateContest();        // OPEN → ACTIVE
 contest.lockContest();            // ACTIVE → LOCKED
-contest.settleContest(winningEntries, payoutBps);  // LOCKED → SETTLED
+contest.settleContest(winningEntries, payoutBps, secondaryWinner);  // LOCKED → SETTLED
 
 // Optional: Push payouts for efficiency (full net amounts; clears unallocated balance to oracle)
 contest.pushPrimaryPayouts(entryIds);

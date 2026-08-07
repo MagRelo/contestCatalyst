@@ -23,7 +23,9 @@ interface IERC20Balance {
  *      sell-backs use backed liquidity only.
  *      On settlement, all per-entry secondary balances are merged into `secondaryLiquidityPerEntry[secondaryWinningEntry]`
  *      so winning-entry ERC1155 holders redeem pro-rata against the full secondary TVL (or it spills to primary payouts
- *      if there is no supply on the winning entry). Each secondary buy credits liquidity and mints ERC1155 to the caller per the bonding curve from the entry's current nonnegative supply.
+ *      if there is no supply on the winning entry). The secondary winner, referral fee anchor, and spill-dust remainder
+ *      are taken from the explicit `secondaryWinner` settle parameter (must be in `winningEntries`), not array index 0.
+ *      Each secondary buy credits liquidity and mints ERC1155 to the caller per the bonding curve from the entry's current nonnegative supply.
  */
 contract ContestController is ERC1155, ReentrancyGuard {
     address public constant REFERRAL_ROOT = address(0x0000000000000000000000000000000000000001);
@@ -103,7 +105,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
 
     event ContestActivated();
     event ContestLocked();
-    event ContestSettled(uint256[] winningEntries, uint256[] payouts);
+    event ContestSettled(uint256[] winningEntries, uint256[] payouts, uint256 secondaryWinningEntry);
     event ContestCancelled();
     event ContestEmergencyRecovered(uint256 amount);
     event UnallocatedBalanceCleared(uint256 amount);
@@ -315,26 +317,36 @@ contract ContestController is ERC1155, ReentrancyGuard {
         emit ContestLocked();
     }
 
-    function settleContest(uint256[] calldata winningEntries, uint256[] calldata payoutBps)
-        external
-        onlyOracle
-        nonReentrant
-    {
+    /// @notice Settles the contest. Primary payouts are position-paired with `payoutBps`.
+    /// @param secondaryWinner Entry that receives the merged secondary pool, anchors referral fees,
+    ///        and receives zero-supply spill dust. Must be an active member of `winningEntries`
+    ///        (independent of array order).
+    function settleContest(
+        uint256[] calldata winningEntries,
+        uint256[] calldata payoutBps,
+        uint256 secondaryWinner
+    ) external onlyOracle nonReentrant {
         require(state == ContestState.LOCKED, "Contest not locked");
         require(winningEntries.length > 0, "Must have at least one winner");
         require(winningEntries.length == payoutBps.length, "Array length mismatch");
         require(winningEntries.length <= entries.length, "Too many winners");
+        require(entryIndexPlusOne[secondaryWinner] != 0, "Secondary winner not an active entry");
 
         uint256 totalBps = 0;
+        bool secondaryWinnerInSet = false;
         for (uint256 i = 0; i < payoutBps.length; i++) {
             require(payoutBps[i] > 0, "Use non-zero payouts only");
             totalBps += payoutBps[i];
             uint256 eid = winningEntries[i];
             require(entryIndexPlusOne[eid] != 0, "Winner not an active entry");
+            if (eid == secondaryWinner) {
+                secondaryWinnerInSet = true;
+            }
             for (uint256 j = 0; j < i; j++) {
                 require(winningEntries[j] != eid, "Duplicate winning entry");
             }
         }
+        require(secondaryWinnerInSet, "Secondary winner not in winningEntries");
         require(totalBps == BPS_DENOMINATOR, "Payouts must sum to 100%");
 
         uint256 totalPrimary = primaryPrizePool;
@@ -355,7 +367,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
         uint256 netSecondary = (totalSecondary * netBps) / BPS_DENOMINATOR;
 
         if (referralFee > 0) {
-            address winner = entryOwner[winningEntries[0]];
+            address winner = entryOwner[secondaryWinner];
             require(winner != address(0), "Invalid winner");
 
             // Self-call so any referral dependency revert (or overpay) restores the fee
@@ -385,7 +397,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
             primaryPrizePoolPayouts[entryId] += payout;
         }
 
-        secondaryWinningEntry = winningEntries[0];
+        secondaryWinningEntry = secondaryWinner;
         secondaryMarketResolved = true;
 
         for (uint256 k = 0; k < entries.length; k++) {
@@ -410,11 +422,11 @@ contract ContestController is ERC1155, ReentrancyGuard {
                 }
             }
             if (distributed < poolToDistribute) {
-                primaryPrizePoolPayouts[winningEntries[0]] += poolToDistribute - distributed;
+                primaryPrizePoolPayouts[secondaryWinner] += poolToDistribute - distributed;
             }
         }
 
-        emit ContestSettled(winningEntries, payoutBps);
+        emit ContestSettled(winningEntries, payoutBps, secondaryWinner);
     }
 
     /// @dev Split an undistributed referral fee back across primary/secondary in proportion to gross TVL.

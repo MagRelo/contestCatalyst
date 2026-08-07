@@ -105,12 +105,22 @@ abstract contract ReferralTestHarness is Test {
     function _settleContest(ContestController c, uint256[] memory winningEntries, uint256[] memory payoutBps)
         internal
     {
+        uint256 secondaryWinner = winningEntries.length > 0 ? winningEntries[0] : 0;
+        _settleContest(c, winningEntries, payoutBps, secondaryWinner);
+    }
+
+    function _settleContest(
+        ContestController c,
+        uint256[] memory winningEntries,
+        uint256[] memory payoutBps,
+        uint256 secondaryWinner
+    ) internal {
         if (c.state() == ContestController.ContestState.ACTIVE) {
             vm.prank(c.oracle());
             c.lockContest();
         }
         vm.prank(c.oracle());
-        c.settleContest(winningEntries, payoutBps);
+        c.settleContest(winningEntries, payoutBps, secondaryWinner);
     }
 
     function _settleContestExpectRevert(
@@ -119,13 +129,24 @@ abstract contract ReferralTestHarness is Test {
         uint256[] memory payoutBps,
         bytes memory reason
     ) internal {
+        uint256 secondaryWinner = winningEntries.length > 0 ? winningEntries[0] : 0;
+        _settleContestExpectRevert(c, winningEntries, payoutBps, secondaryWinner, reason);
+    }
+
+    function _settleContestExpectRevert(
+        ContestController c,
+        uint256[] memory winningEntries,
+        uint256[] memory payoutBps,
+        uint256 secondaryWinner,
+        bytes memory reason
+    ) internal {
         if (c.state() == ContestController.ContestState.ACTIVE) {
             vm.prank(c.oracle());
             c.lockContest();
         }
         vm.prank(c.oracle());
         vm.expectRevert(reason);
-        c.settleContest(winningEntries, payoutBps);
+        c.settleContest(winningEntries, payoutBps, secondaryWinner);
     }
 
     /// @dev Activate if still OPEN so secondary buys succeed under ACTIVE-only gating.
