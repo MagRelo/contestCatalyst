@@ -28,7 +28,7 @@ Combined format on that substrate:
 
 ## Trust model: `operator` is a trusted escrow agent
 
-`operator` is **not** an on-chain truth oracle. It is an immutable, trusted escrow/ops agent chosen at contest creation. Participants must trust this address (prefer a multisig in production).
+`operator` is **not** an on-chain truth oracle. It is an immutable, trusted escrow/ops agent fixed on the factory (and copied into every contest). Participants must trust this address (prefer a multisig in production).
 
 | Power        | Notes                                                                                                   |
 | ------------ | ------------------------------------------------------------------------------------------------------- |
@@ -59,7 +59,7 @@ CANCELLED ←───────┘
 - After `expiryTimestamp`, the operator has an exclusive `SETTLEMENT_GRACE_PERIOD` (1 day) to `settleContest` while LOCKED. Permissionless `cancelExpired()` only unlocks after `expiryTimestamp + SETTLEMENT_GRACE_PERIOD` (lost-operator / abandoned-contest escape hatch).
 - After push batches, any **unallocated** balance (integer-division residuals / donations with no claimable owner) is credited into the secondary winning pool, or else the first still-owed primary payout — never transferred to the operator.
 - `paymentToken` should be a standard non-fee, non-rebasing ERC20.
-- Contest deployers must also trust the `referralGraph` owner / per-group authorized oracles; a live `getReferrer` at settle is intentional.
+- Participants must also trust the factory's immutable `referralGraph` owner / per-group authorized oracles; a live `getReferrer` at settle is intentional.
 
 **Referral network fee:** At settlement, `referralNetworkBps` (≤10%) is deducted once from gross TVL. Distribution uses `ReferralGraph` + `RewardCalculator`; if the winner has no payable referrer or distribution fails, the fee is restored proportionally to the primary and secondary pools.
 
@@ -143,25 +143,28 @@ forge script script/DeployFactory.s.sol:DeployFactoryScript \
 Use the factory to create a new contest:
 
 ```solidity
+// Deploy factory once with platform trust surface (immutable for all contests from this factory)
+ContestFactory factory = new ContestFactory(
+    paymentToken,       // ERC20 token address (e.g., CUT)
+    operator,           // Trusted escrow agent (lifecycle, settle, push) — prefer multisig
+    referralGraph,
+    rewardCalculator,
+    referralGroupId
+);
+
 address contest = factory.createContest(
-    paymentToken,                      // ERC20 token address (e.g., CUT)
-    operator,                          // Trusted escrow agent (lifecycle, settle, push) — prefer multisig
     contestantDepositAmount,           // Fixed deposit for primary participants
     referralNetworkBps,                // Referral network fee in basis points at settlement (max 1000 = 10%)
     expiry,                            // Expiration timestamp
-    primaryDepositSecondarySubsidyBps, // e.g. 700 = 7%; BPS of each primary deposit to secondary subsidy (unbacked)
-    referralGraph,                     // Platform ReferralGraph (referralTree)
-    rewardCalculator,                  // Platform RewardCalculator (referralTree)
-    referralGroupId                    // bytes32 group for ReferralGraph lookups
+    primaryDepositSecondarySubsidyBps  // e.g. 700 = 7%; BPS of each primary deposit to secondary subsidy (unbacked)
 );
 ```
 
 ### Example Parameters
 
-- `paymentToken`: Address of ERC20 token (typically platform token)
+- `paymentToken` / `operator` / `referralGraph` / `rewardCalculator` / `referralGroupId`: factory-level immutables set at factory deploy; every contest from that factory inherits them
 - `operator`: trusted escrow/ops agent (not an on-chain truth oracle); use a multisig in production
 - `referralNetworkBps`: 500 = 5% fee at settlement (standard in tests)
-- `referralGraph` / `rewardCalculator` / `referralGroupId`: per-contest immutables; backend typically passes the same platform values for every contest
 - `primaryDepositSecondarySubsidyBps`: 700 = 7% (matches test and doc baselines in this repo)
 - `expiry`: after this timestamp, operator has `SETTLEMENT_GRACE_PERIOD` (1 day) exclusive settle window before permissionless `cancelExpired`
 

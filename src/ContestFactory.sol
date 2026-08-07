@@ -5,24 +5,55 @@ import "./ContestController.sol";
 
 /**
  * @title ContestFactory
- * @dev Factory for creating ContestController instances
+ * @dev Factory for creating ContestController instances.
+ *      `paymentToken`, `operator`, `referralGraph`, `rewardCalculator`, and `referralGroupId`
+ *      are factory-level immutables so permissionless `createContest` callers cannot choose
+ *      the trust surface or payment asset.
  */
 contract ContestFactory {
+    address public immutable paymentToken;
+    address public immutable operator;
+    address public immutable referralGraph;
+    address public immutable rewardCalculator;
+    bytes32 public immutable referralGroupId;
+
     address[] public contests;
     mapping(address => address) public contestHost;
 
-    event ContestCreated(address indexed contest, address indexed host, uint256 contestantDepositAmount);
-
-    function createContest(
+    event ContestCreated(
+        address indexed contest,
+        address indexed host,
+        uint256 contestantDepositAmount,
         address paymentToken,
         address operator,
-        uint256 contestantDepositAmount,
-        uint256 referralNetworkBps,
-        uint256 expiry,
-        uint256 primaryDepositSecondarySubsidyBps,
         address referralGraph,
         address rewardCalculator,
         bytes32 referralGroupId
+    );
+
+    constructor(
+        address _paymentToken,
+        address _operator,
+        address _referralGraph,
+        address _rewardCalculator,
+        bytes32 _referralGroupId
+    ) {
+        require(_paymentToken != address(0), "Invalid payment token");
+        require(_operator != address(0), "Invalid operator");
+        require(_referralGraph != address(0), "Invalid referral graph");
+        require(_rewardCalculator != address(0), "Invalid reward calculator");
+        paymentToken = _paymentToken;
+        operator = _operator;
+        referralGraph = _referralGraph;
+        rewardCalculator = _rewardCalculator;
+        referralGroupId = _referralGroupId;
+    }
+
+    function createContest(
+        uint256 contestantDepositAmount,
+        uint256 referralNetworkBps,
+        uint256 expiry,
+        uint256 primaryDepositSecondarySubsidyBps
     ) external returns (address) {
         ContestController contest = new ContestController(
             paymentToken,
@@ -40,7 +71,16 @@ contract ContestFactory {
         contests.push(contestAddress);
         contestHost[contestAddress] = msg.sender;
 
-        emit ContestCreated(contestAddress, msg.sender, contestantDepositAmount);
+        emit ContestCreated(
+            contestAddress,
+            msg.sender,
+            contestantDepositAmount,
+            paymentToken,
+            operator,
+            referralGraph,
+            rewardCalculator,
+            referralGroupId
+        );
 
         return contestAddress;
     }

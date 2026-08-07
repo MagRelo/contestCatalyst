@@ -73,10 +73,8 @@ contract ContestControllerTest is ReferralTestHarness {
     
     function setUp() public {
         paymentToken = new MockERC20("Payment Token", "PAY", 18);
-        _initReferralInfra();
+        _initReferralInfra(address(paymentToken), operator);
         contest = _createContest(
-            address(paymentToken),
-            operator,
             PRIMARY_DEPOSIT,
             REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
@@ -98,10 +96,8 @@ contract ContestControllerTest is ReferralTestHarness {
     /**
      * @notice Deploy a new contest with standard settings
      */
-    function _deployContest(address _operator, uint256 _expiryOffset) internal returns (ContestController) {
+    function _deployContest(uint256 _expiryOffset) internal returns (ContestController) {
         return _createContest(
-            address(paymentToken),
-            _operator,
             PRIMARY_DEPOSIT,
             REFERRAL_NETWORK_BPS,
             block.timestamp + _expiryOffset,
@@ -111,8 +107,6 @@ contract ContestControllerTest is ReferralTestHarness {
 
     function _deployContestSubsidy(uint256 subsidyBps) internal returns (ContestController) {
         return _createContest(
-            address(paymentToken),
-            operator,
             PRIMARY_DEPOSIT,
             REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
@@ -282,58 +276,75 @@ contract ContestControllerTest is ReferralTestHarness {
     // ============ Constructor Tests ============
     
     function test_constructor_ValidParameters() public {
-        ContestController newContest = _deployContest(operator, EXPIRY_OFFSET);
+        ContestController newContest = _deployContest(EXPIRY_OFFSET);
         
         assertEq(address(newContest.paymentToken()), address(paymentToken));
         assertEq(newContest.operator(), operator);
         assertEq(newContest.primaryDepositAmount(), PRIMARY_DEPOSIT);
         assertEq(newContest.referralNetworkBps(), REFERRAL_NETWORK_BPS);
         assertEq(newContest.primaryDepositSecondarySubsidyBps(), PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS);
+        assertEq(newContest.referralGraph(), address(referralGraph));
+        assertEq(newContest.rewardCalculator(), address(rewardCalculator));
+        assertEq(newContest.referralGroupId(), REFERRAL_GROUP_ID);
+        assertEq(factory.paymentToken(), address(paymentToken));
+        assertEq(factory.operator(), operator);
+        assertEq(factory.referralGraph(), address(referralGraph));
+        assertEq(factory.rewardCalculator(), address(rewardCalculator));
+        assertEq(factory.referralGroupId(), REFERRAL_GROUP_ID);
         assertEq(newContest.SETTLEMENT_GRACE_PERIOD(), 1 days);
         assertEq(uint8(newContest.state()), uint8(ContestState.OPEN));
     }
-    
-    function test_constructor_InvalidPaymentToken() public {
+
+    function test_factory_InvalidPaymentToken() public {
         vm.expectRevert("Invalid payment token");
-        factory.createContest(
+        new ContestFactory(
             address(0),
             operator,
-            PRIMARY_DEPOSIT,
-            REFERRAL_NETWORK_BPS,
-            block.timestamp + EXPIRY_OFFSET,
-            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
             address(referralGraph),
             address(rewardCalculator),
-            REFERRAL_GROUP_ID            
+            REFERRAL_GROUP_ID
         );
     }
-    
-    function test_constructor_InvalidOperator() public {
+
+    function test_factory_InvalidOperator() public {
         vm.expectRevert("Invalid operator");
-        factory.createContest(
+        new ContestFactory(
             address(paymentToken),
             address(0),
-            PRIMARY_DEPOSIT,
-            REFERRAL_NETWORK_BPS,
-            block.timestamp + EXPIRY_OFFSET,
-            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
             address(referralGraph),
             address(rewardCalculator),
-            REFERRAL_GROUP_ID            
+            REFERRAL_GROUP_ID
+        );
+    }
+
+    function test_factory_InvalidReferralGraph() public {
+        vm.expectRevert("Invalid referral graph");
+        new ContestFactory(
+            address(paymentToken),
+            operator,
+            address(0),
+            address(rewardCalculator),
+            REFERRAL_GROUP_ID
+        );
+    }
+
+    function test_factory_InvalidRewardCalculator() public {
+        vm.expectRevert("Invalid reward calculator");
+        new ContestFactory(
+            address(paymentToken),
+            operator,
+            address(referralGraph),
+            address(0),
+            REFERRAL_GROUP_ID
         );
     }
 
     function test_constructor_ZeroDepositAmount_Succeeds() public {
         address contestAddress = factory.createContest(
-            address(paymentToken),
-            operator,
             0,
             REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
-            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
-            address(referralGraph),
-            address(rewardCalculator),
-            REFERRAL_GROUP_ID            
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
         );
         ContestController freeContest = ContestController(contestAddress);
         assertEq(freeContest.primaryDepositAmount(), 0);
@@ -343,15 +354,10 @@ contract ContestControllerTest is ReferralTestHarness {
     /// @dev Free primary: add entry with no token transfer, activate, secondary still works
     function test_zeroDepositContest_primaryAndSecondaryFlow() public {
         address contestAddress = factory.createContest(
-            address(paymentToken),
-            operator,
             0,
             REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
-            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
-            address(referralGraph),
-            address(rewardCalculator),
-            REFERRAL_GROUP_ID            
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
         );
         ContestController freeContest = ContestController(contestAddress);
         paymentToken.mint(user1, PURCHASE_INCREMENT);
@@ -373,45 +379,30 @@ contract ContestControllerTest is ReferralTestHarness {
     function test_constructor_ReferralFeeTooHigh() public {
         vm.expectRevert("Referral network fee too high");
         factory.createContest(
-            address(paymentToken),
-            operator,
             PRIMARY_DEPOSIT,
             1001, // > 10%
             block.timestamp + EXPIRY_OFFSET,
-            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
-            address(referralGraph),
-            address(rewardCalculator),
-            REFERRAL_GROUP_ID            
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
         );
     }
     
     function test_constructor_ExpiryInPast() public {
         vm.expectRevert("Expiry in past");
         factory.createContest(
-            address(paymentToken),
-            operator,
             PRIMARY_DEPOSIT,
             REFERRAL_NETWORK_BPS,
             block.timestamp - 1,
-            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
-            address(referralGraph),
-            address(rewardCalculator),
-            REFERRAL_GROUP_ID            
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
         );
     }
 
     function test_constructor_SubsidyBpsTooHigh() public {
         vm.expectRevert("Subsidy bps too high");
         factory.createContest(
-            address(paymentToken),
-            operator,
             PRIMARY_DEPOSIT,
             REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
-            10_001,
-            address(referralGraph),
-            address(rewardCalculator),
-            REFERRAL_GROUP_ID            
+            10_001
         );
     }
 
@@ -562,7 +553,7 @@ contract ContestControllerTest is ReferralTestHarness {
     }
     
     function test_addPrimaryPosition_ContestExpired() public {
-        ContestController expiredContest = _deployContest(operator, 1 days);
+        ContestController expiredContest = _deployContest(1 days);
         vm.warp(block.timestamp + 1 days + 1);
         
         MockERC20(paymentToken).mint(user1, PRIMARY_DEPOSIT);
@@ -961,9 +952,8 @@ contract ContestControllerTest is ReferralTestHarness {
         uint256 primaryDeposit6 = 25e6; // $25
         uint256 purchase6 = 10e6; // $10
 
-        ContestController usdcContest = _createContest(
+        ContestController usdcContest = _createContestWithToken(
             address(usdc),
-            operator,
             primaryDeposit6,
             REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
@@ -1014,9 +1004,8 @@ contract ContestControllerTest is ReferralTestHarness {
         uint256 primaryDeposit6 = 25e6;
         uint256 minBuy6 = 1e6; // $1
 
-        ContestController usdcContest = _createContest(
+        ContestController usdcContest = _createContestWithToken(
             address(usdc),
-            operator,
             primaryDeposit6,
             REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
@@ -1481,7 +1470,7 @@ contract ContestControllerTest is ReferralTestHarness {
         assertEq(paymentToken.balanceOf(user3) - before3, expected3);
 
         // Contest B: identical setup; operator pushes to user3
-        ContestController pushContest = _deployContest(operator, EXPIRY_OFFSET);
+        ContestController pushContest = _deployContest(EXPIRY_OFFSET);
         _createPrimaryEntryOn(pushContest, user1, ENTRY_1);
         _createPrimaryEntryOn(pushContest, user2, ENTRY_2);
         _createSecondaryPositionOn(pushContest, user3, ENTRY_1, PURCHASE_INCREMENT * 4);
@@ -1760,7 +1749,7 @@ contract ContestControllerTest is ReferralTestHarness {
         _createSecondaryPosition(user3, ENTRY_1, PURCHASE_INCREMENT);
         _createSecondaryPosition(user4, ENTRY_2, PURCHASE_INCREMENT * 2);
 
-        ContestController contestB = _deployContest(operator, EXPIRY_OFFSET);
+        ContestController contestB = _deployContest(EXPIRY_OFFSET);
         _createPrimaryEntryOn(contestB, user1, ENTRY_1);
         _createPrimaryEntryOn(contestB, user2, ENTRY_2);
         _createSecondaryPositionOn(contestB, user3, ENTRY_1, PURCHASE_INCREMENT);
@@ -2012,7 +2001,7 @@ contract ContestControllerTest is ReferralTestHarness {
     // ============ cancelExpired Tests ============
     
     function test_cancelExpired_Success() public {
-        ContestController expiredContest = _deployContest(operator, 1 days);
+        ContestController expiredContest = _deployContest(1 days);
         vm.warp(block.timestamp + 1 days + expiredContest.SETTLEMENT_GRACE_PERIOD() + 1);
         
         expiredContest.cancelExpired();
@@ -2261,9 +2250,8 @@ contract ContestControllerTest is ReferralTestHarness {
 
     function test_pushPrimaryPayouts_skipsRevertingRecipient() public {
         MockERC20 blockedToken = new MockERC20("Blocked Token", "BLK", 18);
-        ContestController c = _createContest(
+        ContestController c = _createContestWithToken(
             address(blockedToken),
-            operator,
             PRIMARY_DEPOSIT,
             REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
@@ -2813,7 +2801,7 @@ contract ContestControllerTest is ReferralTestHarness {
         contest.addPrimaryPosition(ENTRY_1, new bytes32[](0));
         
         // Create a fresh contest to test "Entry already exists"
-        ContestController newContest = _deployContest(operator, EXPIRY_OFFSET);
+        ContestController newContest = _deployContest(EXPIRY_OFFSET);
         paymentToken.mint(user1, PRIMARY_DEPOSIT);
         vm.prank(user1);
         paymentToken.approve(address(newContest), PRIMARY_DEPOSIT);
@@ -2961,8 +2949,6 @@ contract ContestControllerTest is ReferralTestHarness {
 
     function test_settleContest_ReferralFeeZeroSkipsDistribution() public {
         ContestController zeroFee = _createContest(
-            address(paymentToken),
-            operator,
             PRIMARY_DEPOSIT,
             0,
             block.timestamp + EXPIRY_OFFSET,
@@ -3078,18 +3064,13 @@ contract ContestControllerTest is ReferralTestHarness {
 
     function test_settleContest_MaliciousCalculatorFallsBackProportionally() public {
         MaliciousOverpayCalculator evil = new MaliciousOverpayCalculator();
-        address contestAddress = factory.createContest(
-            address(paymentToken),
-            operator,
+        ContestController c = _createContestWithCalculator(
             PRIMARY_DEPOSIT,
             REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
             PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
-            address(referralGraph),
-            address(evil),
-            REFERRAL_GROUP_ID            
+            address(evil)
         );
-        ContestController c = ContestController(contestAddress);
 
         address referrer = address(0xBEEF);
         _registerWinnerReferrer(user1, referrer);
@@ -3130,18 +3111,13 @@ contract ContestControllerTest is ReferralTestHarness {
 
     function test_settleContest_RevertingCalculatorFallsBackProportionally() public {
         RevertingRewardCalculator evil = new RevertingRewardCalculator();
-        address contestAddress = factory.createContest(
-            address(paymentToken),
-            operator,
+        ContestController c = _createContestWithCalculator(
             PRIMARY_DEPOSIT,
             REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
             PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
-            address(referralGraph),
-            address(evil),
-            REFERRAL_GROUP_ID            
+            address(evil)
         );
-        ContestController c = ContestController(contestAddress);
 
         address referrer = address(0xCAFE);
         _registerWinnerReferrer(user1, referrer);
@@ -3176,18 +3152,13 @@ contract ContestControllerTest is ReferralTestHarness {
 
     function test_settleContest_UnderpayCalculatorRestoresShortfall() public {
         UnderpayRewardCalculator underpay = new UnderpayRewardCalculator();
-        address contestAddress = factory.createContest(
-            address(paymentToken),
-            operator,
+        ContestController c = _createContestWithCalculator(
             PRIMARY_DEPOSIT,
             REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
             PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
-            address(referralGraph),
-            address(underpay),
-            REFERRAL_GROUP_ID
+            address(underpay)
         );
-        ContestController c = ContestController(contestAddress);
 
         address referrer = address(0xB0B);
         _registerWinnerReferrer(user1, referrer);
@@ -3229,15 +3200,10 @@ contract ContestControllerTest is ReferralTestHarness {
     function test_addPrimaryPosition_MaxEntriesReached() public {
         // Fill almost to cap using a fresh zero-deposit contest to keep funding cheap
         address contestAddress = factory.createContest(
-            address(paymentToken),
-            operator,
             0,
             REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
-            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS,
-            address(referralGraph),
-            address(rewardCalculator),
-            REFERRAL_GROUP_ID            
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
         );
         ContestController capped = ContestController(contestAddress);
 

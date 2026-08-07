@@ -31,6 +31,9 @@ interface IERC20Balance {
  *      controls lifecycle transitions, settlement winners/`payoutBps`/`secondaryWinner`, merkle roots, cancel,
  *      and push payouts. Participants must trust the chosen `operator` off-chain; there is no on-chain outcome
  *      verification. Prefer a multisig in production. Distinct from ReferralGraph's authorized-oracle role.
+ *      `paymentToken`, `operator`, `referralGraph`, `rewardCalculator`, and `referralGroupId` are
+ *      fixed by the ContestFactory deployer (factory immutables), not by the permissionless
+ *      `createContest` caller.
  */
 contract ContestController is ERC1155, ReentrancyGuard {
     address public constant REFERRAL_ROOT = address(0x0000000000000000000000000000000000000001);

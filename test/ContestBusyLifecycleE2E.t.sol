@@ -30,10 +30,8 @@ contract ContestBusyLifecycleE2E is ReferralTestHarness {
 
     function setUp() public {
         paymentToken = new BusyE2EMockERC20("Payment Token", "PAY", 18);
-        _initReferralInfra();
+        _initReferralInfra(address(paymentToken), operator);
         contest = _createContest(
-            address(paymentToken),
-            operator,
             PRIMARY_DEPOSIT,
             REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,

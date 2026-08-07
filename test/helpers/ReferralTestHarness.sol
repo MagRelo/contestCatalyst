@@ -24,35 +24,71 @@ abstract contract ReferralTestHarness is Test {
 
     address internal referralOwner;
     address internal referralOracleSigner;
+    address internal harnessPaymentToken;
+    address internal harnessOperator;
 
-    function _initReferralInfra() internal {
+    function _initReferralInfra(address paymentToken, address contestOperator) internal {
         referralOwner = address(this);
         referralOracleSigner = vm.addr(referralOracleKey);
+        harnessPaymentToken = paymentToken;
+        harnessOperator = contestOperator;
 
         referralGraph = new ReferralGraph(referralOwner, referralOracleSigner, REFERRAL_GROUP_ID);
         rewardCalculator = new RewardCalculator();
-        factory = new ContestFactory();
+        factory = new ContestFactory(
+            paymentToken,
+            contestOperator,
+            address(referralGraph),
+            address(rewardCalculator),
+            REFERRAL_GROUP_ID
+        );
     }
 
     function _createContest(
-        address paymentToken,
-        address contestOperator,
         uint256 primaryDeposit,
         uint256 referralBps,
         uint256 expiry,
         uint256 subsidyBps
     ) internal returns (ContestController) {
-        address addr = factory.createContest(
+        address addr = factory.createContest(primaryDeposit, referralBps, expiry, subsidyBps);
+        return ContestController(addr);
+    }
+
+    /// @dev One-off factory with a different payment token (same operator / referral infra).
+    function _createContestWithToken(
+        address paymentToken,
+        uint256 primaryDeposit,
+        uint256 referralBps,
+        uint256 expiry,
+        uint256 subsidyBps
+    ) internal returns (ContestController) {
+        ContestFactory customFactory = new ContestFactory(
             paymentToken,
-            contestOperator,
-            primaryDeposit,
-            referralBps,
-            expiry,
-            subsidyBps,
+            harnessOperator,
             address(referralGraph),
             address(rewardCalculator),
             REFERRAL_GROUP_ID
         );
+        address addr = customFactory.createContest(primaryDeposit, referralBps, expiry, subsidyBps);
+        return ContestController(addr);
+    }
+
+    /// @dev One-off factory wired to a non-canonical calculator (fallback tests).
+    function _createContestWithCalculator(
+        uint256 primaryDeposit,
+        uint256 referralBps,
+        uint256 expiry,
+        uint256 subsidyBps,
+        address calculator
+    ) internal returns (ContestController) {
+        ContestFactory customFactory = new ContestFactory(
+            harnessPaymentToken,
+            harnessOperator,
+            address(referralGraph),
+            calculator,
+            REFERRAL_GROUP_ID
+        );
+        address addr = customFactory.createContest(primaryDeposit, referralBps, expiry, subsidyBps);
         return ContestController(addr);
     }
 

@@ -69,10 +69,8 @@ contract SecondaryContestPricingTest is ReferralTestHarness {
         // Deploy mock ERC20 token
         paymentToken = new MockERC20("Payment Token", "PAY", 18);
         
-        _initReferralInfra();
+        _initReferralInfra(address(paymentToken), operator);
         contest = _createContest(
-            address(paymentToken),
-            operator,
             PRIMARY_DEPOSIT,
             REFERRAL_NETWORK_BPS,
             block.timestamp + 365 days,
