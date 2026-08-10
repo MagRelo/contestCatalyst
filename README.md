@@ -56,8 +56,6 @@ This role is distinct from ReferralGraph’s per-group **authorized oracle** (re
 
 Lifecycle summary is above. Extra rules:
 
-- **CLOSED**: enum sentinel only; unreachable on-chain.
-
 - After `expiryTimestamp`, the operator has an exclusive `SETTLEMENT_GRACE_PERIOD` (1 day) to `settleContest` while LOCKED. Permissionless `cancelExpired()` only unlocks after `expiryTimestamp + SETTLEMENT_GRACE_PERIOD` (lost-operator / abandoned-contest escape hatch).
 - After push batches, any **unallocated** balance (integer-division residuals / donations with no claimable owner) is credited into the secondary winning pool, or else the first still-owed primary payout — never transferred to the operator.
 - `paymentToken` should be a standard non-fee, non-rebasing ERC20.

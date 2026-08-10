@@ -45,8 +45,7 @@ contract ContestControllerTest is ReferralTestHarness {
         ACTIVE,
         LOCKED,
         SETTLED,
-        CANCELLED,
-        CLOSED
+        CANCELLED
     }
     
     // Test contracts
@@ -260,9 +259,6 @@ contract ContestControllerTest is ReferralTestHarness {
             contest.lockContest();
         } else if (state == ContestState.CANCELLED) {
             contest.cancelContest();
-        } else if (state == ContestState.CLOSED) {
-            // CLOSED is unreachable on-chain; tests that need it should set state via a harness.
-            revert("CLOSED unreachable");
         }
     }
     

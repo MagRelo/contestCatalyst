@@ -126,8 +126,7 @@ contract SecondaryContestTest is Test {
         ACTIVE,    // 1
         LOCKED,    // 2
         SETTLED,   // 3
-        CANCELLED, // 4
-        CLOSED     // 5
+        CANCELLED  // 4
     }
 
     // Test contract with storage mappings to test library functions
@@ -435,14 +434,6 @@ contract SecondaryContestTest is Test {
         testStorage.validateAddSecondaryPosition(ENTRY_1, AMOUNT_1, uint8(ContestState.CANCELLED));
     }
 
-    function test_validateAddSecondaryPosition_Invalid_CLOSED() public {
-        _setState(ContestState.CLOSED);
-        _createEntry(ENTRY_1, entryOwner1);
-        
-        vm.expectRevert("Secondary positions not available");
-        testStorage.validateAddSecondaryPosition(ENTRY_1, AMOUNT_1, uint8(ContestState.CLOSED));
-    }
-
     function test_validateAddSecondaryPosition_Invalid_EntryDoesNotExist() public {
         _setState(ContestState.ACTIVE);
         // Entry not created
@@ -521,9 +512,6 @@ contract SecondaryContestTest is Test {
         
         vm.expectRevert("Secondary positions not available");
         testStorage.validateAddSecondaryPosition(entryId, amount, uint8(ContestState.CANCELLED));
-        
-        vm.expectRevert("Secondary positions not available");
-        testStorage.validateAddSecondaryPosition(entryId, amount, uint8(ContestState.CLOSED));
     }
 
     // ============ validateRemoveSecondaryPosition Tests ============
@@ -590,19 +578,6 @@ contract SecondaryContestTest is Test {
             TOKENS_1,
             TOKENS_2,
             uint8(ContestState.SETTLED)
-        );
-    }
-
-    function test_validateRemoveSecondaryPosition_Invalid_CLOSED() public {
-        _setState(ContestState.CLOSED);
-        _createEntry(ENTRY_1, entryOwner1);
-        
-        vm.expectRevert("Cannot withdraw - competition started or settled");
-        testStorage.validateRemoveSecondaryPosition(
-            ENTRY_1,
-            TOKENS_1,
-            TOKENS_2,
-            uint8(ContestState.CLOSED)
         );
     }
 
@@ -768,20 +743,6 @@ contract SecondaryContestTest is Test {
             ENTRY_1,
             TOKENS_1,
             uint8(ContestState.LOCKED),
-            true,
-            ENTRY_1
-        );
-    }
-
-    function test_validateClaimSecondaryPayout_Invalid_CLOSED() public {
-        _setState(ContestState.CLOSED);
-        _createEntry(ENTRY_1, entryOwner1);
-        
-        vm.expectRevert("Contest not settled");
-        testStorage.validateClaimSecondaryPayout(
-            ENTRY_1,
-            TOKENS_1,
-            uint8(ContestState.CLOSED),
             true,
             ENTRY_1
         );

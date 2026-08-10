@@ -110,8 +110,7 @@ contract PrimaryContestTest is Test {
         ACTIVE,    // 1
         LOCKED,    // 2
         SETTLED,   // 3
-        CANCELLED, // 4
-        CLOSED     // 5
+        CANCELLED  // 4
     }
 
     // Test contract with storage mappings to test library functions
@@ -394,13 +393,6 @@ contract PrimaryContestTest is Test {
         testStorage.validateAddPrimaryPosition(ENTRY_1, block.timestamp + 1000, uint8(ContestState.CANCELLED));
     }
 
-    function test_validateAddPrimaryPosition_ClosedState() public {
-        testStorage.setCurrentState(uint8(ContestState.CLOSED));
-        
-        vm.expectRevert("Contest not open");
-        testStorage.validateAddPrimaryPosition(ENTRY_1, block.timestamp + 1000, uint8(ContestState.CLOSED));
-    }
-
     function test_validateAddPrimaryPosition_ExistingEntry() public {
         testStorage.setCurrentState(uint8(ContestState.OPEN));
         testStorage.setEntryOwner(ENTRY_1, owner1);
@@ -486,14 +478,6 @@ contract PrimaryContestTest is Test {
         testStorage.validateRemovePrimaryPosition(ENTRY_1, owner1, uint8(ContestState.SETTLED));
     }
 
-    function test_validateRemovePrimaryPosition_ClosedState() public {
-        testStorage.setCurrentState(uint8(ContestState.CLOSED));
-        testStorage.setEntryOwner(ENTRY_1, owner1);
-        
-        vm.expectRevert("Cannot withdraw - contest in progress or settled");
-        testStorage.validateRemovePrimaryPosition(ENTRY_1, owner1, uint8(ContestState.CLOSED));
-    }
-
     function test_validateRemovePrimaryPosition_WrongOwner() public {
         testStorage.setCurrentState(uint8(ContestState.OPEN));
         testStorage.setEntryOwner(ENTRY_1, owner1);
@@ -551,14 +535,6 @@ contract PrimaryContestTest is Test {
         
         vm.expectRevert("Contest not settled");
         testStorage.validateClaimPrimaryPayout(ENTRY_1, owner1, uint8(ContestState.CANCELLED), PAYOUT);
-    }
-
-    function test_validateClaimPrimaryPayout_ClosedState() public {
-        testStorage.setCurrentState(uint8(ContestState.CLOSED));
-        testStorage.setEntryOwner(ENTRY_1, owner1);
-        
-        vm.expectRevert("Contest not settled");
-        testStorage.validateClaimPrimaryPayout(ENTRY_1, owner1, uint8(ContestState.CLOSED), PAYOUT);
     }
 
     function test_validateClaimPrimaryPayout_WrongOwner() public {

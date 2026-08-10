@@ -69,9 +69,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
         ACTIVE,
         LOCKED,
         SETTLED,
-        CANCELLED,
-        /// @dev Unused / unreachable — retained as an invalid-state sentinel for validators
-        CLOSED
+        CANCELLED
     }
 
     ContestState public state;
@@ -487,7 +485,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
     }
 
     function cancelContest() external onlyOperator {
-        require(state != ContestState.SETTLED && state != ContestState.CLOSED, "Contest settled - cannot cancel");
+        require(state != ContestState.SETTLED, "Contest settled - cannot cancel");
         state = ContestState.CANCELLED;
         emit ContestCancelled();
     }
@@ -505,7 +503,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
     /// @notice Permissionless cancel after expiry plus `SETTLEMENT_GRACE_PERIOD` (operator settle priority window).
     function cancelExpired() external {
         require(block.timestamp >= expiryTimestamp + SETTLEMENT_GRACE_PERIOD, "Settlement grace period active");
-        require(state != ContestState.SETTLED && state != ContestState.CLOSED, "Already settled");
+        require(state != ContestState.SETTLED, "Already settled");
         state = ContestState.CANCELLED;
         emit ContestCancelled();
     }
