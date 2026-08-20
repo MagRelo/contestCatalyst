@@ -291,6 +291,38 @@ contract ContestControllerTest is ReferralTestHarness {
         assertEq(uint8(newContest.state()), uint8(ContestState.OPEN));
     }
 
+    function test_createContest_emitsHostChosenParams() public {
+        uint256 expiry = block.timestamp + EXPIRY_OFFSET;
+        address predicted = vm.computeCreateAddress(address(factory), vm.getNonce(address(factory)));
+
+        vm.expectEmit(true, true, false, true);
+        emit ContestFactory.ContestCreated(
+            predicted,
+            address(this),
+            PRIMARY_DEPOSIT,
+            address(paymentToken),
+            operator,
+            address(referralGraph),
+            address(rewardCalculator),
+            REFERRAL_GROUP_ID,
+            REFERRAL_NETWORK_BPS,
+            expiry,
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
+        );
+
+        address contestAddress = factory.createContest(
+            PRIMARY_DEPOSIT,
+            REFERRAL_NETWORK_BPS,
+            expiry,
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
+        );
+        assertEq(contestAddress, predicted);
+        ContestController created = ContestController(contestAddress);
+        assertEq(created.referralNetworkBps(), REFERRAL_NETWORK_BPS);
+        assertEq(created.expiryTimestamp(), expiry);
+        assertEq(created.primaryDepositSecondarySubsidyBps(), PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS);
+    }
+
     function test_factory_InvalidPaymentToken() public {
         vm.expectRevert("Invalid payment token");
         new ContestFactory(

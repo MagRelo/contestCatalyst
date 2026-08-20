@@ -28,7 +28,10 @@ contract ContestFactory {
         address operator,
         address referralGraph,
         address rewardCalculator,
-        bytes32 referralGroupId
+        bytes32 referralGroupId,
+        uint256 referralNetworkBps,
+        uint256 expiry,
+        uint256 primaryDepositSecondarySubsidyBps
     );
 
     constructor(
@@ -79,7 +82,10 @@ contract ContestFactory {
             operator,
             referralGraph,
             rewardCalculator,
-            referralGroupId
+            referralGroupId,
+            referralNetworkBps,
+            expiry,
+            primaryDepositSecondarySubsidyBps
         );
 
         return contestAddress;
