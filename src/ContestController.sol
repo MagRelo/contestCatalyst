@@ -153,6 +153,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
         require(_primaryDepositSecondarySubsidyBps <= 1000, "Subsidy bps too high");
         require(_referralGraph != address(0), "Invalid referral graph");
         require(_rewardCalculator != address(0), "Invalid reward calculator");
+        require(_primaryDepositAmount > 0, "Deposit amount required");
 
         paymentToken = _paymentToken;
         paymentTokenDecimals = ERC20(_paymentToken).decimals();

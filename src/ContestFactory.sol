@@ -58,6 +58,7 @@ contract ContestFactory {
         uint256 expiry,
         uint256 primaryDepositSecondarySubsidyBps
     ) external returns (address) {
+        require(contestantDepositAmount > 0, "Deposit amount required");
         ContestController contest = new ContestController(
             paymentToken,
             operator,
