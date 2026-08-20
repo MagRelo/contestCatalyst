@@ -398,18 +398,18 @@ contract ContestControllerTest is ReferralTestHarness {
             PRIMARY_DEPOSIT,
             REFERRAL_NETWORK_BPS,
             block.timestamp + EXPIRY_OFFSET,
-            10_001
+            1001
         );
     }
 
     function test_constructor_SubsidyBpsMax_succeeds() public {
-        ContestController c = _deployContestSubsidy(10_000);
-        assertEq(c.primaryDepositSecondarySubsidyBps(), 10_000);
+        ContestController c = _deployContestSubsidy(1000);
+        assertEq(c.primaryDepositSecondarySubsidyBps(), 1000);
     }
 
     function test_subsidy_addPrimary_splitsPoolAndSubsidy() public {
-        ContestController c = _deployContestSubsidy(2000);
-        uint256 subsidy = (PRIMARY_DEPOSIT * 2000) / 10_000;
+        ContestController c = _deployContestSubsidy(1000);
+        uint256 subsidy = (PRIMARY_DEPOSIT * 1000) / 10_000;
         _fundUserContest(user1, c, PRIMARY_DEPOSIT);
         vm.prank(user1);
         c.addPrimaryPosition(ENTRY_1, new bytes32[](0));
@@ -419,8 +419,8 @@ contract ContestControllerTest is ReferralTestHarness {
     }
 
     function test_subsidy_removePrimary_restoresSubsidy() public {
-        ContestController c = _deployContestSubsidy(2000);
-        uint256 subsidy = (PRIMARY_DEPOSIT * 2000) / 10_000;
+        ContestController c = _deployContestSubsidy(1000);
+        uint256 subsidy = (PRIMARY_DEPOSIT * 1000) / 10_000;
         _fundUserContest(user1, c, PRIMARY_DEPOSIT);
         vm.prank(user1);
         c.addPrimaryPosition(ENTRY_1, new bytes32[](0));
@@ -435,8 +435,8 @@ contract ContestControllerTest is ReferralTestHarness {
     }
 
     function test_subsidy_sellbackUsesBackedOnly() public {
-        ContestController c = _deployContestSubsidy(2000);
-        uint256 subsidy = (PRIMARY_DEPOSIT * 2000) / 10_000;
+        ContestController c = _deployContestSubsidy(1000);
+        uint256 subsidy = (PRIMARY_DEPOSIT * 1000) / 10_000;
         _fundUserContest(user1, c, PRIMARY_DEPOSIT);
         vm.prank(user1);
         c.addPrimaryPosition(ENTRY_1, new bytes32[](0));
@@ -458,7 +458,7 @@ contract ContestControllerTest is ReferralTestHarness {
     }
 
     function test_subsidy_settlement_loanRepayThenResidualToWinner() public {
-        ContestController c = _deployContestSubsidy(2000);
+        ContestController c = _deployContestSubsidy(1000);
         _fundUserContest(user1, c, PRIMARY_DEPOSIT);
         vm.prank(user1);
         c.addPrimaryPosition(ENTRY_1, new bytes32[](0));
@@ -477,7 +477,7 @@ contract ContestControllerTest is ReferralTestHarness {
         uint256[] memory payoutBps = new uint256[](1);
         payoutBps[0] = 10_000;
 
-        uint256 gross = PURCHASE_INCREMENT + (PRIMARY_DEPOSIT * 2000) / 10_000;
+        uint256 gross = PURCHASE_INCREMENT + (PRIMARY_DEPOSIT * 1000) / 10_000;
         uint256 netSecondary = _expectedNetSecondaryAfterFeeRestore(
             c.primaryPrizePool(), gross, c.referralNetworkBps(), c.primaryDepositSecondarySubsidyBps()
         );

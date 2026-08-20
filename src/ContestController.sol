@@ -48,7 +48,8 @@ contract ContestController is ERC1155, ReentrancyGuard {
     uint256 public immutable referralNetworkBps;
     uint256 public immutable expiryTimestamp;
     /// @notice BPS carved from each primary deposit into `secondaryPrimarySubsidyPerEntry` (no ERC1155 mint).
-    /// @dev At settle, the same BPS of total secondary TVL (backed + subsidy) is credited back to primary.
+    /// @dev Host-capped at 1000 (10%), same as `referralNetworkBps`. At settle, the same BPS of total
+    ///      secondary TVL (backed + subsidy) is credited back to primary.
     uint256 public immutable primaryDepositSecondarySubsidyBps;
     /// @notice Minimum secondary buy size: 1 whole payment-token unit ($1 for USD stables)
     uint256 public immutable minSecondaryPurchaseAmount;
@@ -149,7 +150,7 @@ contract ContestController is ERC1155, ReentrancyGuard {
         require(_operator != address(0), "Invalid operator");
         require(_referralNetworkBps <= 1000, "Referral network fee too high");
         require(_expiryTimestamp > block.timestamp, "Expiry in past");
-        require(_primaryDepositSecondarySubsidyBps <= BPS_DENOMINATOR, "Subsidy bps too high");
+        require(_primaryDepositSecondarySubsidyBps <= 1000, "Subsidy bps too high");
         require(_referralGraph != address(0), "Invalid referral graph");
         require(_rewardCalculator != address(0), "Invalid reward calculator");
 

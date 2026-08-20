@@ -156,7 +156,7 @@ address contest = factory.createContest(
     contestantDepositAmount,           // Fixed deposit for primary participants
     referralNetworkBps,                // Referral network fee in basis points at settlement (max 1000 = 10%)
     expiry,                            // Expiration timestamp
-    primaryDepositSecondarySubsidyBps  // e.g. 700 = 7%; deposit carve + settle loan-repay rate
+    primaryDepositSecondarySubsidyBps  // e.g. 700 = 7%; deposit carve + settle loan-repay rate (max 1000 = 10%)
 );
 ```
 
@@ -165,7 +165,7 @@ address contest = factory.createContest(
 - `paymentToken` / `operator` / `referralGraph` / `rewardCalculator` / `referralGroupId`: factory-level immutables set at factory deploy; every contest from that factory inherits them
 - `operator`: trusted escrow/ops agent (not an on-chain truth oracle); use a multisig in production
 - `referralNetworkBps`: 500 = 5% fee at settlement (standard in tests)
-- `primaryDepositSecondarySubsidyBps`: 700 = 7% deposit carve and settle repay rate (matches test/doc baselines)
+- `primaryDepositSecondarySubsidyBps`: 700 = 7% deposit carve and settle repay rate (matches test/doc baselines; max 1000 = 10%)
 - `expiry`: after this timestamp, operator has `SETTLEMENT_GRACE_PERIOD` (1 day) exclusive settle window before permissionless `cancelExpired`
 
 ## Testing Guide
