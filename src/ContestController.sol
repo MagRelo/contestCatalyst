@@ -538,7 +538,9 @@ contract ContestController is ERC1155, ReentrancyGuard {
     }
 
     /// @dev Shared primary payout used by pull and push. Accounting clears inside this call so a
-    ///      reverting transfer rolls back and leaves the payout claimable.
+    ///      reverting transfer rolls back and leaves the payout claimable. Clamps to live
+    ///      `balanceOf(this)` like `_paySecondaryClaim` so a short balance (fee-on-transfer /
+    ///      rebasing token) cannot permanently stick the tail claimant.
     function _payPrimaryPayout(uint256 entryId) internal {
         address owner = entryOwner[entryId];
         uint256 payout = primaryPrizePoolPayouts[entryId];
@@ -546,6 +548,11 @@ contract ContestController is ERC1155, ReentrancyGuard {
         require(payout > 0, "No payout");
 
         primaryPrizePoolPayouts[entryId] = 0;
+
+        uint256 available = IERC20Balance(paymentToken).balanceOf(address(this));
+        if (payout > available) {
+            payout = available;
+        }
 
         if (primaryPrizePool >= payout) {
             primaryPrizePool -= payout;

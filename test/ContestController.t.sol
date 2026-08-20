@@ -826,6 +826,39 @@ contract ContestControllerTest is ReferralTestHarness {
         assertEq(paymentToken.balanceOf(user1), balanceBefore + payout);
         assertEq(contest.primaryPrizePoolPayouts(ENTRY_1), 0);
     }
+
+    /// @dev Mirrors `_paySecondaryClaim`: if live token balance is below the recorded liability,
+    ///      pay what remains instead of reverting the tail claimant forever.
+    function test_claimPrimaryPayout_clampsToLiveBalance() public {
+        _createPrimaryEntry(user1, ENTRY_1);
+        _createPrimaryEntry(user2, ENTRY_2);
+
+        vm.prank(operator);
+        contest.activateContest();
+        vm.prank(operator);
+        contest.lockContest();
+
+        uint256[] memory winners = new uint256[](2);
+        winners[0] = ENTRY_1;
+        winners[1] = ENTRY_2;
+        uint256[] memory payouts = new uint256[](2);
+        payouts[0] = 7000;
+        payouts[1] = 3000;
+        _settleContest(contest, winners, payouts);
+
+        uint256 recorded = contest.primaryPrizePoolPayouts(ENTRY_1);
+        uint256 short = recorded / 2;
+        require(short > 0 && short < recorded, "need a strict shortfall");
+        deal(address(paymentToken), address(contest), short);
+
+        uint256 balanceBefore = paymentToken.balanceOf(user1);
+        vm.prank(user1);
+        contest.claimPrimaryPayout(ENTRY_1);
+
+        assertEq(paymentToken.balanceOf(user1), balanceBefore + short);
+        assertEq(contest.primaryPrizePoolPayouts(ENTRY_1), 0);
+        assertEq(paymentToken.balanceOf(address(contest)), 0);
+    }
     
     function test_claimPrimaryPayout_afterSecondaryAdds() public {
         _createPrimaryEntry(user1, ENTRY_1);
