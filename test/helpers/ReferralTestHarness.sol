@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
+import "forge-std/Vm.sol";
 import "../../src/ContestController.sol";
 import "../../src/ContestFactory.sol";
 import "referralTree/core/ReferralGraph.sol";
@@ -35,6 +36,7 @@ abstract contract ReferralTestHarness is Test {
 
         referralGraph = new ReferralGraph(referralOwner, referralOracleSigner, REFERRAL_GROUP_ID);
         rewardCalculator = new RewardCalculator();
+        referralGraph.setRewardCalculator(address(rewardCalculator));
         factory = new ContestFactory(
             paymentToken,
             contestOperator,
@@ -164,12 +166,139 @@ abstract contract ReferralTestHarness is Test {
         uint256[] memory payoutBps,
         uint256 secondaryWinner
     ) internal {
+        _settleContest(c, winningEntries, payoutBps, secondaryWinner, bytes32(0));
+    }
+
+    function _settleContest(
+        ContestController c,
+        uint256[] memory winningEntries,
+        uint256[] memory payoutBps,
+        uint256 secondaryWinner,
+        bytes32 referralNonce
+    ) internal {
         if (c.state() == ContestController.ContestState.ACTIVE) {
             vm.prank(c.operator());
             c.lockContest();
         }
+        (uint256 deadline, address oracle, bytes memory signature) =
+            _referralAuth(c, _primaryWinnerEntry(winningEntries, payoutBps), referralNonce);
         vm.prank(c.operator());
-        c.settleContest(winningEntries, payoutBps, secondaryWinner);
+        c.settleContest(winningEntries, payoutBps, secondaryWinner, referralNonce, deadline, oracle, signature);
+    }
+
+    /// @dev Entry with the largest primary share. Ties keep the earlier `winningEntries` element.
+    function _primaryWinnerEntry(uint256[] memory winningEntries, uint256[] memory payoutBps)
+        internal
+        pure
+        returns (uint256 entryId)
+    {
+        uint256 bestBps;
+        uint256 n = winningEntries.length < payoutBps.length ? winningEntries.length : payoutBps.length;
+        for (uint256 i = 0; i < n; i++) {
+            if (payoutBps[i] > bestBps) {
+                bestBps = payoutBps[i];
+                entryId = winningEntries[i];
+            }
+        }
+    }
+
+    /// @dev Signs RewardRoots when this settle has a payable referrer chain. Otherwise the signature is unused.
+    function _referralAuth(ContestController c, uint256 primaryWinnerEntry, bytes32 referralNonce)
+        internal
+        view
+        returns (uint256 deadline, address oracle, bytes memory signature)
+    {
+        deadline = block.timestamp + 1 days;
+        oracle = referralOracleSigner;
+        address winner = c.entryOwner(primaryWinnerEntry);
+        if (winner == address(0) || c.referralNetworkBps() == 0) return (deadline, oracle, signature);
+
+        address[] memory chain =
+            referralGraph.getPayoutAncestors(winner, c.referralGroupId(), c.MAX_REFERRAL_PAYOUT_LEVELS());
+        if (chain.length == 0) return (deadline, oracle, signature);
+
+        uint256 fee = _referralFeeAmount(c);
+        if (fee == 0) return (deadline, oracle, signature);
+
+        signature = _signRewardRoots(c, address(c), winner, fee, deadline, referralNonce);
+    }
+
+    function _assertRootsRewarded(
+        ContestController c,
+        address triggerUser,
+        uint256 distributedAmount,
+        bytes32 referralNonce
+    ) internal view {
+        _assertRootsRewarded(vm.getRecordedLogs(), c, triggerUser, distributedAmount, referralNonce);
+    }
+
+    function _assertRootsRewarded(
+        Vm.Log[] memory logs,
+        ContestController c,
+        address triggerUser,
+        uint256 distributedAmount,
+        bytes32 referralNonce
+    ) internal view {
+        bytes32 topic = keccak256("RootsRewarded(bytes32,bytes32,address,address,uint256,address[],uint256[])");
+        bytes32 rewardId = c.referralRewardId(referralNonce);
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].emitter != address(referralGraph) || logs[i].topics[0] != topic) continue;
+            assertEq(logs[i].topics[1], c.referralGroupId());
+            assertEq(logs[i].topics[2], rewardId);
+            assertEq(address(uint160(uint256(logs[i].topics[3]))), triggerUser);
+            (address token, uint256 amount,,) = abi.decode(logs[i].data, (address, uint256, address[], uint256[]));
+            assertEq(token, c.paymentToken());
+            assertEq(amount, distributedAmount);
+            return;
+        }
+        revert("RootsRewarded not emitted");
+    }
+
+    function _assertProtocolFeeCharged(
+        Vm.Log[] memory logs,
+        ContestController c,
+        address recipient,
+        uint256 amount,
+        bytes32 referralNonce
+    ) internal view {
+        bytes32 topic = keccak256("ProtocolFeeCharged(bytes32,bytes32,address,address,uint256)");
+        bytes32 rewardId = c.referralRewardId(referralNonce);
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].emitter != address(referralGraph) || logs[i].topics[0] != topic) continue;
+            assertEq(logs[i].topics[1], c.referralGroupId());
+            assertEq(logs[i].topics[2], rewardId);
+            assertEq(address(uint160(uint256(logs[i].topics[3]))), c.paymentToken());
+            (address gotRecipient, uint256 gotAmount) = abi.decode(logs[i].data, (address, uint256));
+            assertEq(gotRecipient, recipient);
+            assertEq(gotAmount, amount);
+            return;
+        }
+        revert("ProtocolFeeCharged not emitted");
+    }
+
+    function _signRewardRoots(
+        ContestController c,
+        address payer,
+        address user,
+        uint256 totalAmount,
+        uint256 deadline,
+        bytes32 referralNonce
+    ) internal view returns (bytes memory) {
+        bytes32 structHash = keccak256(
+            abi.encode(
+                referralGraph.REWARD_ROOTS_TYPEHASH(),
+                c.referralGroupId(),
+                c.referralRewardId(referralNonce),
+                user,
+                c.paymentToken(),
+                totalAmount,
+                payer,
+                deadline
+            )
+        );
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", referralGraph.DOMAIN_SEPARATOR(), structHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(referralOracleKey, digest);
+        return abi.encodePacked(r, s, v);
     }
 
     function _settleContestExpectRevert(
@@ -193,9 +322,11 @@ abstract contract ReferralTestHarness is Test {
             vm.prank(c.operator());
             c.lockContest();
         }
+        (uint256 deadline, address oracle, bytes memory signature) =
+            _referralAuth(c, _primaryWinnerEntry(winningEntries, payoutBps), bytes32(0));
         vm.prank(c.operator());
         vm.expectRevert(reason);
-        c.settleContest(winningEntries, payoutBps, secondaryWinner);
+        c.settleContest(winningEntries, payoutBps, secondaryWinner, bytes32(0), deadline, oracle, signature);
     }
 
     /// @dev Activate if still OPEN so secondary buys succeed under ACTIVE-only gating.

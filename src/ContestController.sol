@@ -15,6 +15,10 @@ interface IERC20Balance {
     function balanceOf(address account) external view returns (uint256);
 }
 
+interface IReferralGraphCalculator {
+    function rewardCalculator() external view returns (address);
+}
+
 /**
  * @title ContestController
  * @dev Layer 1: primary prize pool (deposit minus optional subsidy carve). Layer 2: per-entry bonding
@@ -23,14 +27,18 @@ interface IERC20Balance {
  *      sell-backs use backed liquidity only.
  *      On settlement, all per-entry secondary balances are merged into `secondaryLiquidityPerEntry[secondaryWinningEntry]`
  *      so winning-entry ERC1155 holders redeem pro-rata against the full secondary TVL (or it spills to primary payouts
- *      if there is no supply on the winning entry). The secondary winner, referral fee anchor, and spill-dust remainder
+ *      if there is no supply on the winning entry). The secondary winner and spill-dust remainder
  *      are taken from the explicit `secondaryWinner` settle parameter (must be in `winningEntries`), not array index 0.
+ *      The referral-fee trigger is the primary winner: the `winningEntries` entry with the largest `payoutBps`
+ *      (the earlier entry on a tie).
  *      Each secondary buy credits liquidity and mints ERC1155 to the caller per the bonding curve from the entry's current nonnegative supply.
  *
  * @dev Trust model: `operator` is a trusted escrow/ops agent (not an on-chain truth oracle). It unilaterally
  *      controls lifecycle transitions, settlement winners/`payoutBps`/`secondaryWinner`, merkle roots, cancel,
  *      and push payouts. Participants must trust the chosen `operator` off-chain; there is no on-chain outcome
- *      verification. Prefer a multisig in production. Distinct from ReferralGraph's authorized-oracle role.
+ *      verification. Prefer a multisig in production. Distinct from ReferralGraph's authorized-oracle role,
+ *      which registers referrers and signs `rewardRoots`. The graph owner sets the calculator used for that
+ *      payout and may take a protocol fee of up to 10% out of the referral fee.
  *      `paymentToken`, `operator`, `referralGraph`, `rewardCalculator`, and `referralGroupId` are
  *      fixed by the ContestFactory deployer (factory immutables), not by the permissionless
  *      `createContest` caller.
@@ -313,13 +321,30 @@ contract ContestController is ERC1155, ReentrancyGuard {
     /// @dev Trusted `operator` supplies winners and splits — no on-chain outcome verification.
     ///      Before fees, credits `primaryDepositSecondarySubsidyBps` of secondary TVL back to primary
     ///      (loan repay); residual secondary merges onto `secondaryWinner`.
-    /// @param secondaryWinner Entry that receives the residual secondary pool, anchors referral fees,
-    ///        and receives zero-supply spill dust. Must be an active member of `winningEntries`
-    ///        (independent of array order).
+    /// @notice Reward id for this contest's `rewardRoots` payout inside the shared referral group.
+    /// @dev `keccak256(abi.encode("contest-catalyst", address(this), nonce))`. Nonce `0` is the usual id.
+    ///      Pass a new nonce, with a matching oracle signature, to resubmit after `RewardIdUsed`.
+    function referralRewardId(bytes32 nonce) public view returns (bytes32) {
+        return keccak256(abi.encode("contest-catalyst", address(this), nonce));
+    }
+
+    /// @param secondaryWinner Entry that receives the residual secondary pool and zero-supply spill dust.
+    ///        Must be an active member of `winningEntries` (independent of array order). Referral fees use the
+    ///        primary winner (largest `payoutBps`), not this entry.
+    /// @param referralNonce Nonce mixed into `referralRewardId`. Use `0` unless that id was already consumed.
+    /// @param referralDeadline Inclusive expiry of the oracle `RewardRoots` signature. Ignored when there is
+    ///        no payable referrer chain.
+    /// @param referralOracle Oracle that signed. Must be authorized for `referralGroupId` at settle time.
+    /// @param referralSignature EIP-712 `RewardRoots` signature. `payer` is this contest and `user` is the
+    ///        winning entry's owner. Ignored when that owner has no payable referrer.
     function settleContest(
         uint256[] calldata winningEntries,
         uint256[] calldata payoutBps,
-        uint256 secondaryWinner
+        uint256 secondaryWinner,
+        bytes32 referralNonce,
+        uint256 referralDeadline,
+        address referralOracle,
+        bytes calldata referralSignature
     ) external onlyOperator nonReentrant {
         require(state == ContestState.LOCKED, "Contest not locked");
         require(winningEntries.length > 0, "Must have at least one winner");
@@ -367,19 +392,26 @@ contract ContestController is ERC1155, ReentrancyGuard {
         uint256 netSecondary = (totalSecondary * netBps) / BPS_DENOMINATOR;
 
         if (referralFee > 0) {
-            address winner = entryOwner[secondaryWinner];
+            address winner = entryOwner[_primaryWinnerEntry(winningEntries, payoutBps)];
             require(winner != address(0), "Invalid winner");
 
-            // Self-call so any referral dependency revert (or overpay) restores the fee
-            // proportionally to both pools instead of aborting settlement.
-            try this.distributeReferralFee(winner, referralFee) returns (uint256 undistributed) {
+            // Self-call so a payout failure restores the fee proportionally to both pools.
+            // Signature and configuration errors bubble so the operator can resubmit.
+            try this.distributeReferralFee(
+                winner, referralFee, referralNonce, referralDeadline, referralOracle, referralSignature
+            ) returns (uint256 undistributed) {
                 if (undistributed > 0) {
                     (uint256 toPrimary, uint256 toSecondary) =
                         _splitReferralFeeRestore(undistributed, totalSecondary, totalGross);
                     netPrimary += toPrimary;
                     netSecondary += toSecondary;
                 }
-            } catch {
+            } catch (bytes memory reason) {
+                if (_bubblesReferralRevert(reason)) {
+                    assembly {
+                        revert(add(reason, 0x20), mload(reason))
+                    }
+                }
                 (uint256 toPrimary, uint256 toSecondary) =
                     _splitReferralFeeRestore(referralFee, totalSecondary, totalGross);
                 netPrimary += toPrimary;
@@ -429,6 +461,21 @@ contract ContestController is ERC1155, ReentrancyGuard {
         emit ContestSettled(winningEntries, payoutBps, secondaryWinner);
     }
 
+    /// @dev Primary winner is the largest `payoutBps`. A tie keeps the earlier `winningEntries` element.
+    function _primaryWinnerEntry(uint256[] calldata winningEntries, uint256[] calldata payoutBps)
+        private
+        pure
+        returns (uint256 entryId)
+    {
+        uint256 bestBps;
+        for (uint256 i = 0; i < winningEntries.length; i++) {
+            if (payoutBps[i] > bestBps) {
+                bestBps = payoutBps[i];
+                entryId = winningEntries[i];
+            }
+        }
+    }
+
     /// @dev Split an undistributed referral fee back across primary/secondary in proportion to gross TVL.
     function _splitReferralFeeRestore(uint256 amount, uint256 totalSecondary, uint256 totalGross)
         private
@@ -439,50 +486,59 @@ contract ContestController is ERC1155, ReentrancyGuard {
         toPrimary = amount - toSecondary;
     }
 
-    /// @notice Referral fee distribution (self-call target for try/catch in `settleContest`)
-    /// @return undistributed Fee restored proportionally to primary and secondary pools when there is no payable
-    /// referrer, or when the reward calculator under-allocates (`sum < referralFee`)
-    function distributeReferralFee(address winner, uint256 referralFee) external returns (uint256 undistributed) {
+    /// @notice Referral fee distribution (self-call target for try/catch in `settleContest`).
+    /// @dev Passes `winner` to `ReferralGraph.rewardRoots`. The graph pays ancestors above that user and does
+    ///      not pay the winner. It pulls `referralFee` from this contest. A protocol fee, if set, comes out of that amount.
+    /// @return undistributed Full `referralFee` when there is no payable referrer chain. Success returns 0;
+    ///         the graph reverts unless the split equals the net amount, so a shortfall is not a success path.
+    function distributeReferralFee(
+        address winner,
+        uint256 referralFee,
+        bytes32 referralNonce,
+        uint256 deadline,
+        address oracle,
+        bytes calldata signature
+    ) external returns (uint256 undistributed) {
         require(msg.sender == address(this), "Only self");
 
-        address payoutAnchor = IReferralGraph(referralGraph).getReferrer(winner, referralGroupId);
-
-        if (payoutAnchor == address(0) || payoutAnchor == REFERRAL_ROOT) {
-            emit ReferralNetworkFeeToPrimary(winner, referralFee);
-            return referralFee;
-        }
-
-        address[] memory chain =
-            IReferralGraph(referralGraph).getPayoutChain(payoutAnchor, referralGroupId, MAX_REFERRAL_PAYOUT_LEVELS);
-
-        if (chain.length > MAX_REFERRAL_PAYOUT_LEVELS) {
-            assembly {
-                mstore(chain, MAX_REFERRAL_PAYOUT_LEVELS)
-            }
-        }
-
+        IReferralGraph graph = IReferralGraph(referralGraph);
+        address[] memory chain = graph.getPayoutAncestors(winner, referralGroupId, MAX_REFERRAL_PAYOUT_LEVELS);
         if (chain.length == 0) {
             emit ReferralNetworkFeeToPrimary(winner, referralFee);
             return referralFee;
         }
 
-        uint256[] memory amounts = IRewardCalculator(rewardCalculator).calculateRewards(referralFee, chain.length);
-        require(amounts.length == chain.length, "Reward length mismatch");
+        uint256 protocolFee = (referralFee * graph.feeBps()) / BPS_DENOMINATOR;
+        uint256 distributedAmount = referralFee - protocolFee;
+        bytes32 rewardId = referralRewardId(referralNonce);
+        ERC20(paymentToken).approve(referralGraph, referralFee);
+        graph.rewardRoots(referralGroupId, rewardId, winner, paymentToken, referralFee, deadline, oracle, signature);
 
-        uint256 sum;
-        for (uint256 i = 0; i < amounts.length; i++) {
-            sum += amounts[i];
+        // Best-effort mirror of the net split. RootsRewarded is the source of truth; a reverting calculator
+        // must not undo the payout that already succeeded.
+        uint256[] memory amounts;
+        address calculator = IReferralGraphCalculator(referralGraph).rewardCalculator();
+        try IRewardCalculator(calculator).calculateRewards(distributedAmount, chain.length) returns (
+            uint256[] memory got
+        ) {
+            amounts = got;
+        } catch {
+            amounts = new uint256[](0);
         }
-        require(sum <= referralFee, "Rewards exceed fee");
-        // Calculator may under-allocate; restore the shortfall to both prize pools.
-        undistributed = referralFee - sum;
+        emit ReferralNetworkFeeDistributed(winner, chain[0], referralFee, chain, amounts);
+    }
 
-        for (uint256 i = 0; i < chain.length; i++) {
-            if (amounts[i] > 0) {
-                SafeTransferLib.safeTransfer(ERC20(paymentToken), chain[i], amounts[i]);
-            }
+    /// @dev Signature and configuration errors must revert settlement so the operator can resubmit.
+    function _bubblesReferralRevert(bytes memory reason) private pure returns (bool bubble) {
+        if (reason.length < 4) return false;
+        bytes4 selector;
+        assembly {
+            selector := mload(add(reason, 32))
         }
-        emit ReferralNetworkFeeDistributed(winner, payoutAnchor, referralFee, chain, amounts);
+        bubble = selector == IReferralGraph.InvalidSigner.selector
+            || selector == IReferralGraph.SignatureExpired.selector
+            || selector == IReferralGraph.RewardCalculatorNotSet.selector
+            || selector == IReferralGraph.RewardIdUsed.selector;
     }
 
     function cancelContest() external onlyOperator {

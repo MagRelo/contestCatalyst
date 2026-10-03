@@ -3,6 +3,8 @@ pragma solidity ^0.8.20;
 
 import "../src/ContestController.sol";
 import "./helpers/ReferralTestHarness.sol";
+import "referralTree/interfaces/IReferralGraph.sol";
+import "forge-std/Vm.sol";
 import "../src/SecondaryPricing.sol";
 import "solmate/tokens/ERC20.sol";
 import "solady/utils/MerkleTreeLib.sol";
@@ -1894,7 +1896,7 @@ contract ContestControllerTest is ReferralTestHarness {
         vm.prank(operator);
         vm.expectEmit(true, false, false, false);
         emit ContestController.ContestSettled(winners, payouts, ENTRY_1);
-        contest.settleContest(winners, payouts, ENTRY_1);
+        contest.settleContest(winners, payouts, ENTRY_1, bytes32(0), block.timestamp, address(0), "");
         
         assertEq(uint8(contest.state()), uint8(ContestState.SETTLED));
         assertGt(contest.primaryPrizePoolPayouts(ENTRY_1), 0);
@@ -2060,7 +2062,7 @@ contract ContestControllerTest is ReferralTestHarness {
 
         vm.prank(operator);
         vm.expectRevert("Contest not locked");
-        contest.settleContest(winners, payouts, ENTRY_1);
+        contest.settleContest(winners, payouts, ENTRY_1, bytes32(0), block.timestamp, address(0), "");
     }
     
     function test_settleContest_NoWinners() public {
@@ -3136,10 +3138,51 @@ contract ContestControllerTest is ReferralTestHarness {
         winners[0] = ENTRY_1;
         uint256[] memory payouts = new uint256[](1);
         payouts[0] = 10_000;
+        vm.recordLogs();
         _settleContest(contest, winners, payouts);
 
+        _assertRootsRewarded(contest, winner, referralFee, bytes32(0));
         assertEq(paymentToken.balanceOf(referrer), referrerBefore + expectedAmounts[0]);
         assertEq(paymentToken.balanceOf(winner), winnerBefore);
+    }
+
+    function test_settleContest_ReferralFeeUsesPrimaryWinner() public {
+        address primaryReferrer = address(0xA11);
+        address secondaryReferrer = address(0xB22);
+        _registerWinnerReferrer(user1, primaryReferrer);
+        _registerWinnerReferrer(user2, secondaryReferrer);
+
+        _createPrimaryEntry(user1, ENTRY_1);
+        _createPrimaryEntry(user2, ENTRY_2);
+        vm.prank(operator);
+        contest.activateContest();
+        vm.prank(operator);
+        contest.lockContest();
+
+        uint256 referralFee = _referralFeeAmount(contest);
+        uint256 primaryBefore = paymentToken.balanceOf(primaryReferrer);
+        uint256 secondaryBefore = paymentToken.balanceOf(secondaryReferrer);
+        uint256 winnerBefore = paymentToken.balanceOf(user1);
+
+        // Index 0 is the smaller primary share and the secondary winner. Primary winner is ENTRY_1.
+        uint256[] memory winners = new uint256[](2);
+        winners[0] = ENTRY_2;
+        winners[1] = ENTRY_1;
+        uint256[] memory payouts = new uint256[](2);
+        payouts[0] = 3000;
+        payouts[1] = 7000;
+
+        vm.recordLogs();
+        _settleContest(contest, winners, payouts, ENTRY_2);
+
+        _assertRootsRewarded(contest, user1, referralFee, bytes32(0));
+        assertEq(contest.secondaryWinningEntry(), ENTRY_2);
+        assertEq(
+            paymentToken.balanceOf(primaryReferrer),
+            primaryBefore + rewardCalculator.calculateRewards(referralFee, 1)[0]
+        );
+        assertEq(paymentToken.balanceOf(secondaryReferrer), secondaryBefore);
+        assertEq(paymentToken.balanceOf(user1), winnerBefore);
     }
 
     function test_settleContest_ReferralFeeZeroSkipsDistribution() public {
@@ -3236,7 +3279,7 @@ contract ContestControllerTest is ReferralTestHarness {
 
         vm.prank(operator);
         vm.expectRevert("Duplicate winning entry");
-        contest.settleContest(winners, payouts, ENTRY_1);
+        contest.settleContest(winners, payouts, ENTRY_1, bytes32(0), block.timestamp, address(0), "");
     }
 
     function test_settleContest_RejectsNonMemberWinner() public {
@@ -3256,11 +3299,12 @@ contract ContestControllerTest is ReferralTestHarness {
 
         vm.prank(operator);
         vm.expectRevert("Winner not an active entry");
-        contest.settleContest(winners, payouts, ENTRY_1);
+        contest.settleContest(winners, payouts, ENTRY_1, bytes32(0), block.timestamp, address(0), "");
     }
 
     function test_settleContest_MaliciousCalculatorFallsBackProportionally() public {
         MaliciousOverpayCalculator evil = new MaliciousOverpayCalculator();
+        referralGraph.setRewardCalculator(address(evil));
         ContestController c = _createContestWithCalculator(
             PRIMARY_DEPOSIT,
             REFERRAL_NETWORK_BPS,
@@ -3310,6 +3354,7 @@ contract ContestControllerTest is ReferralTestHarness {
 
     function test_settleContest_RevertingCalculatorFallsBackProportionally() public {
         RevertingRewardCalculator evil = new RevertingRewardCalculator();
+        referralGraph.setRewardCalculator(address(evil));
         ContestController c = _createContestWithCalculator(
             PRIMARY_DEPOSIT,
             REFERRAL_NETWORK_BPS,
@@ -3349,8 +3394,9 @@ contract ContestControllerTest is ReferralTestHarness {
         assertEq(c.primaryPrizePoolPayouts(ENTRY_1), expectedPrimaryPayout);
     }
 
-    function test_settleContest_UnderpayCalculatorRestoresShortfall() public {
+    function test_settleContest_UnderpayCalculatorRestoresFullFee() public {
         UnderpayRewardCalculator underpay = new UnderpayRewardCalculator();
+        referralGraph.setRewardCalculator(address(underpay));
         ContestController c = _createContestWithCalculator(
             PRIMARY_DEPOSIT,
             REFERRAL_NETWORK_BPS,
@@ -3373,16 +3419,15 @@ contract ContestControllerTest is ReferralTestHarness {
         vm.prank(operator);
         c.lockContest();
 
+        // rewardRoots reverts InvalidSplit unless the split equals the net amount, so the whole fee restores.
         uint256 referralFee = _referralFeeAmount(c);
-        uint256 paid = referralFee / 2; // UnderpayRewardCalculator pays half to amounts[0]
-        uint256 shortfall = referralFee - paid;
         uint256 referrerBefore = paymentToken.balanceOf(referrer);
         uint256 totalPrimary = c.primaryPrizePool();
         uint256 totalSecondary = c.getSecondarySideBalance();
         (uint256 rebalPrimary, uint256 rebalSecondary) =
             _applySubsidyLoanRepay(totalPrimary, totalSecondary, PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS);
         (uint256 toPrimary, uint256 toSecondary) =
-            _referralFeeRestoreShares(shortfall, rebalPrimary, rebalSecondary);
+            _referralFeeRestoreShares(referralFee, rebalPrimary, rebalSecondary);
         uint256 expectedPrimaryPayout = (rebalPrimary * _netBps(c)) / 10_000 + toPrimary;
         uint256 expectedSecondary = (rebalSecondary * _netBps(c)) / 10_000 + toSecondary;
 
@@ -3393,9 +3438,212 @@ contract ContestControllerTest is ReferralTestHarness {
         _settleContest(c, winners, payouts);
 
         assertEq(uint8(c.state()), uint8(ContestState.SETTLED));
-        assertEq(paymentToken.balanceOf(referrer), referrerBefore + paid);
+        assertEq(paymentToken.balanceOf(referrer), referrerBefore);
         assertEq(c.primaryPrizePoolPayouts(ENTRY_1), expectedPrimaryPayout);
         assertEq(c.secondaryLiquidityPerEntry(ENTRY_1), expectedSecondary);
+    }
+
+    function test_settleContest_ProtocolFeeComesOutOfReferralFee() public {
+        address referrer = address(0xA11);
+        address feeRecipient = address(0xFEE);
+        _registerWinnerReferrer(user1, referrer);
+        referralGraph.setProtocolFee(1000, feeRecipient);
+
+        _createPrimaryEntry(user1, ENTRY_1);
+        vm.prank(operator);
+        contest.activateContest();
+        vm.prank(operator);
+        contest.lockContest();
+
+        uint256 referralFee = _referralFeeAmount(contest);
+        uint256 protocolFee = referralFee * 1000 / 10_000;
+        uint256 net = referralFee - protocolFee;
+        uint256[] memory expectedAmounts = rewardCalculator.calculateRewards(net, 1);
+        uint256 referrerBefore = paymentToken.balanceOf(referrer);
+        uint256 winnerBefore = paymentToken.balanceOf(user1);
+
+        uint256[] memory winners = new uint256[](1);
+        winners[0] = ENTRY_1;
+        uint256[] memory payouts = new uint256[](1);
+        payouts[0] = 10_000;
+        vm.recordLogs();
+        _settleContest(contest, winners, payouts);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        _assertProtocolFeeCharged(logs, contest, feeRecipient, protocolFee, bytes32(0));
+        _assertRootsRewarded(logs, contest, user1, net, bytes32(0));
+
+        assertEq(paymentToken.balanceOf(feeRecipient), protocolFee);
+        assertEq(paymentToken.balanceOf(referrer), referrerBefore + expectedAmounts[0]);
+        assertEq(paymentToken.balanceOf(user1), winnerBefore);
+        assertEq(uint8(contest.state()), uint8(ContestState.SETTLED));
+    }
+
+    function test_settleContest_ExpiredReferralSignatureReverts() public {
+        address referrer = address(0xA11);
+        _registerWinnerReferrer(user1, referrer);
+        _createPrimaryEntry(user1, ENTRY_1);
+        vm.prank(operator);
+        contest.activateContest();
+        vm.prank(operator);
+        contest.lockContest();
+
+        uint256 referralFee = _referralFeeAmount(contest);
+        // Literal deadline: via_ir can treat `block.timestamp` as constant across `vm.warp`.
+        uint256 deadline = 1;
+        vm.warp(100);
+        bytes memory signature =
+            _signRewardRoots(contest, address(contest), user1, referralFee, deadline, bytes32(0));
+
+        uint256[] memory winners = new uint256[](1);
+        winners[0] = ENTRY_1;
+        uint256[] memory payouts = new uint256[](1);
+        payouts[0] = 10_000;
+        vm.prank(operator);
+        vm.expectRevert(IReferralGraph.SignatureExpired.selector);
+        contest.settleContest(winners, payouts, ENTRY_1, bytes32(0), deadline, referralOracleSigner, signature);
+        assertEq(uint8(contest.state()), uint8(ContestState.LOCKED));
+    }
+
+    function test_settleContest_MismatchedReferralSignatureReverts() public {
+        address referrer = address(0xA11);
+        _registerWinnerReferrer(user1, referrer);
+        _createPrimaryEntry(user1, ENTRY_1);
+        vm.prank(operator);
+        contest.activateContest();
+        vm.prank(operator);
+        contest.lockContest();
+
+        uint256 referralFee = _referralFeeAmount(contest);
+        uint256 deadline = block.timestamp + 1 days;
+        bytes memory signature =
+            _signRewardRoots(contest, address(contest), user1, referralFee + 1, deadline, bytes32(0));
+
+        uint256[] memory winners = new uint256[](1);
+        winners[0] = ENTRY_1;
+        uint256[] memory payouts = new uint256[](1);
+        payouts[0] = 10_000;
+        vm.prank(operator);
+        vm.expectRevert(IReferralGraph.InvalidSigner.selector);
+        contest.settleContest(winners, payouts, ENTRY_1, bytes32(0), deadline, referralOracleSigner, signature);
+        assertEq(uint8(contest.state()), uint8(ContestState.LOCKED));
+    }
+
+    function test_settleContest_SkiplistedAnchorRestoresFee() public {
+        address referrer = address(0xA11);
+        _registerWinnerReferrer(user1, referrer);
+        vm.prank(referralOracleSigner);
+        referralGraph.setSkiplisted(referrer, REFERRAL_GROUP_ID, true);
+
+        _createPrimaryEntry(user1, ENTRY_1);
+        _createSecondaryPosition(user2, ENTRY_1, PURCHASE_INCREMENT);
+
+        uint256 referralFee = _referralFeeAmount(contest);
+        uint256 referrerBefore = paymentToken.balanceOf(referrer);
+        uint256 totalPrimary = contest.primaryPrizePool();
+        uint256 totalSecondary = contest.getSecondarySideBalance();
+        (uint256 rebalPrimary, uint256 rebalSecondary) =
+            _applySubsidyLoanRepay(totalPrimary, totalSecondary, PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS);
+        uint256 netBps = 10_000 - REFERRAL_NETWORK_BPS;
+        (uint256 toPrimary, uint256 toSecondary) =
+            _referralFeeRestoreShares(referralFee, rebalPrimary, rebalSecondary);
+        uint256 expectedPrimaryPayout = (rebalPrimary * netBps) / 10_000 + toPrimary;
+        uint256 expectedSecondary = (rebalSecondary * netBps) / 10_000 + toSecondary;
+
+        uint256[] memory winners = new uint256[](1);
+        winners[0] = ENTRY_1;
+        uint256[] memory payouts = new uint256[](1);
+        payouts[0] = 10_000;
+        _settleContest(contest, winners, payouts);
+
+        assertEq(uint8(contest.state()), uint8(ContestState.SETTLED));
+        assertEq(paymentToken.balanceOf(referrer), referrerBefore);
+        assertEq(contest.primaryPrizePoolPayouts(ENTRY_1), expectedPrimaryPayout);
+        assertEq(contest.secondaryLiquidityPerEntry(ENTRY_1), expectedSecondary);
+    }
+
+    function test_settleContest_DistinctRewardIdsInSameGroup() public {
+        ContestController contestB = _createContest(
+            PRIMARY_DEPOSIT,
+            REFERRAL_NETWORK_BPS,
+            block.timestamp + EXPIRY_OFFSET,
+            PRIMARY_DEPOSIT_SECONDARY_SUBSIDY_BPS
+        );
+        assertTrue(contest.referralRewardId(bytes32(0)) != contestB.referralRewardId(bytes32(0)));
+
+        address referrerA = address(0xA11);
+        address referrerB = address(0xB22);
+        _registerWinnerReferrer(user1, referrerA);
+        _registerWinnerReferrer(user2, referrerB);
+
+        _createPrimaryEntry(user1, ENTRY_1);
+        _createPrimaryEntryOn(contestB, user2, ENTRY_1);
+        vm.prank(operator);
+        contest.activateContest();
+        vm.prank(operator);
+        contestB.activateContest();
+
+        uint256 beforeA = paymentToken.balanceOf(referrerA);
+        uint256 beforeB = paymentToken.balanceOf(referrerB);
+        uint256 feeA = _referralFeeAmount(contest);
+        uint256 feeB = _referralFeeAmount(contestB);
+
+        uint256[] memory winners = new uint256[](1);
+        winners[0] = ENTRY_1;
+        uint256[] memory payouts = new uint256[](1);
+        payouts[0] = 10_000;
+        _settleContest(contest, winners, payouts);
+        _settleContest(contestB, winners, payouts);
+
+        assertEq(paymentToken.balanceOf(referrerA), beforeA + rewardCalculator.calculateRewards(feeA, 1)[0]);
+        assertEq(paymentToken.balanceOf(referrerB), beforeB + rewardCalculator.calculateRewards(feeB, 1)[0]);
+    }
+
+    function test_settleContest_RewardIdUsedRetriesWithNewNonce() public {
+        address referrer = address(0xA11);
+        _registerWinnerReferrer(user1, referrer);
+        _createPrimaryEntry(user1, ENTRY_1);
+        vm.prank(operator);
+        contest.activateContest();
+        vm.prank(operator);
+        contest.lockContest();
+
+        uint256 referralFee = _referralFeeAmount(contest);
+        uint256 deadline = block.timestamp + 1 days;
+        uint256 griefAmount = 1e18;
+        paymentToken.mint(address(this), griefAmount);
+        paymentToken.approve(address(referralGraph), griefAmount);
+        bytes memory griefSig = _signRewardRoots(contest, address(this), user1, griefAmount, deadline, bytes32(0));
+        referralGraph.rewardRoots(
+            REFERRAL_GROUP_ID,
+            contest.referralRewardId(bytes32(0)),
+            user1,
+            address(paymentToken),
+            griefAmount,
+            deadline,
+            referralOracleSigner,
+            griefSig
+        );
+
+        uint256[] memory winners = new uint256[](1);
+        winners[0] = ENTRY_1;
+        uint256[] memory payouts = new uint256[](1);
+        payouts[0] = 10_000;
+
+        bytes memory contestSig =
+            _signRewardRoots(contest, address(contest), user1, referralFee, deadline, bytes32(0));
+        vm.prank(operator);
+        vm.expectRevert(IReferralGraph.RewardIdUsed.selector);
+        contest.settleContest(winners, payouts, ENTRY_1, bytes32(0), deadline, referralOracleSigner, contestSig);
+        assertEq(uint8(contest.state()), uint8(ContestState.LOCKED));
+
+        uint256 referrerBefore = paymentToken.balanceOf(referrer);
+        _settleContest(contest, winners, payouts, ENTRY_1, bytes32(uint256(1)));
+        assertEq(uint8(contest.state()), uint8(ContestState.SETTLED));
+        assertEq(
+            paymentToken.balanceOf(referrer),
+            referrerBefore + rewardCalculator.calculateRewards(referralFee, 1)[0]
+        );
     }
 
     function test_addPrimaryPosition_MaxEntriesReached() public {
@@ -3429,7 +3677,7 @@ contract MaliciousOverpayCalculator {
     }
 }
 
-/// @dev Allocates only half the fee so sum < referralFee; shortfall must restore to prize pools
+/// @dev Allocates only half the fee. `rewardRoots` rejects the inexact split and the full fee restores.
 contract UnderpayRewardCalculator {
     function calculateRewards(uint256 referralFee, uint256 numRecipients)
         external

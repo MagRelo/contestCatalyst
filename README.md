@@ -50,7 +50,7 @@ CANCELLED
 | Allowlists   | `setPrimaryMerkleRoot` / `setSecondaryMerkleRoot`                                                       |
 | Push payouts | `pushPrimaryPayouts` / `pushSecondaryPayouts`                                                           |
 
-This role is distinct from ReferralGraph’s per-group **authorized oracle** (referral-tree registration only).
+This role is distinct from ReferralGraph’s per-group **authorized oracle** (registration and the EIP-712 `RewardRoots` signature used at settlement).
 
 ## State Machine (ops notes)
 
@@ -59,9 +59,9 @@ Lifecycle summary is above. Extra rules:
 - After `expiryTimestamp`, the operator has an exclusive `SETTLEMENT_GRACE_PERIOD` (1 day) to `settleContest` while LOCKED. Permissionless `cancelExpired()` only unlocks after `expiryTimestamp + SETTLEMENT_GRACE_PERIOD` (lost-operator / abandoned-contest escape hatch).
 - After push batches, any **unallocated** balance (integer-division residuals / donations with no claimable owner) is credited into the secondary winning pool, or else the first still-owed primary payout — never transferred to the operator.
 - `paymentToken` should be a standard non-fee, non-rebasing ERC20.
-- Participants must also trust the factory's immutable `referralGraph` owner / per-group authorized oracles; a live `getReferrer` at settle is intentional.
+- Participants must also trust the factory's immutable `referralGraph` owner (calculator and protocol fee) and the group's authorized oracles (registration and `RewardRoots` signatures). A live `getReferrer` at settle is intentional.
 
-**Referral network fee:** At settlement, `referralNetworkBps` (≤10%) is deducted once from gross TVL. Distribution uses `ReferralGraph` + `RewardCalculator`; if the winner has no payable referrer or distribution fails, the fee is restored proportionally to the primary and secondary pools.
+**Referral network fee:** At settlement, `referralNetworkBps` (≤10%) is deducted once from gross TVL. The contest calls `ReferralGraph.rewardRoots` with the primary winner (the winning entry with the largest `payoutBps`). The graph pays that owner's referrers and does not pay the owner. If there is no payable chain, or the payout fails, the fee is restored proportionally to the primary and secondary pools. An invalid signature, expired deadline, unset calculator, or already-used reward id reverts settlement so the operator can resubmit. A graph protocol fee, when set, is taken out of that referral fee.
 
 ## Quick Usage Guide
 
@@ -97,7 +97,15 @@ contest.claimSecondaryPayout(entryId);
 // State transitions
 contest.activateContest();        // OPEN → ACTIVE
 contest.lockContest();            // ACTIVE → LOCKED
-contest.settleContest(winningEntries, payoutBps, secondaryWinner);  // LOCKED → SETTLED
+contest.settleContest(
+    winningEntries,
+    payoutBps,
+    secondaryWinner,
+    referralNonce,      // bytes32(0) unless resubmitting after RewardIdUsed
+    referralDeadline,   // inclusive RewardRoots deadline
+    referralOracle,     // authorized signer for the group
+    referralSignature   // EIP-712 RewardRoots; payer = contest, user = primary winner
+);  // LOCKED → SETTLED
 
 // Optional: Push payouts for efficiency (full net amounts; allocates unallocated dust to winner pools).
 // Both primary and secondary batches isolate per-recipient failures (e.g. blocklisted addresses).
