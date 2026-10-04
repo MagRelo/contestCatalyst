@@ -1,2 +1,5 @@
 referralTree/=lib/referralTree/src/
 @openzeppelin/contracts/=lib/referralTree/lib/openzeppelin-contracts/contracts/
+solmate/=lib/solmate/src/
+forge-std/=lib/forge-std/src/
+solady/=lib/solady/src/
